@@ -22,6 +22,7 @@ logs/
 
 # Local prompts / scratch docs / Cursor-only assets
 .cursor/skills/
+.cursor/rules/
 my_prompt/
 
 # 仅本地、不推送到 GitHub 的说明文档
