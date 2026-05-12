@@ -1,0 +1,44 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+/build/
+dist/
+wheels/
+*.egg-info
+
+# Test tool caches
+.pytest_cache/
+
+# Virtual environments
+.venv
+
+# 敏感信息 —— 永远不要提交
+.env
+doubao_apikey.txt
+
+# 提取产物（体积大，按需保留）
+pages/
+logs/
+
+# Local prompts / scratch docs / Cursor-only assets
+.cursor/skills/
+my_prompt/
+
+# 仅本地、不推送到 GitHub 的说明文档
+AGENTS.md
+ARCHITECTURE.md
+llm_reference/
+context/
+
+# User-dropped source files in repo root (local only)
+/*.pdf
+/*.doc
+/*.docx
+/*.ppt
+/*.pptx
+/*.png
+
+# Runtime data generated under per-job workspaces
+data/*/
+data/config.yaml
+!data/.gitkeep

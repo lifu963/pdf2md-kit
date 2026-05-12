@@ -1,0 +1,15 @@
+[project]
+name = "pdf-to-knowledge-base"
+version = "0.1.0"
+description = "PDF 课件 → Markdown 知识库（豆包多模态视觉模型）"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135.3",
+    "openai>=2.30.0",
+    "pymupdf>=1.27.2.2",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.24",
+    "tqdm>=4.0.0",
+    "uvicorn>=0.44.0",
+]

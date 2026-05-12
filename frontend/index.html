@@ -1,0 +1,4796 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF 生成 Markdown 知识库</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #e8e4d9;
+        --fg: #1a1a2e;
+        --bg-alt: #ddd8ca;
+        --bg-invert: #1a1a2e;
+        --fg-invert: #ebe6d9;
+        --border-w: 3px;
+        --pixel: 3px;
+        /* 主按钮：参考 Neo-brutalist 白底 + 右下实体「硬阴影」块（与卡片/装饰的 3px 偏移区分） */
+        --btn-hard: 5px;
+        --btn-face: #ffffff;
+        /* 硬阴影：白底按钮用 fg 加色相加深（极深但非纯黑）；深底按钮旁浅色块用米色掺 theme */
+        --btn-shadow-hard-light: var(--fg);
+        --btn-shadow-hard-warm: var(--fg-invert);
+        --font-pixel: "Press Start 2P", cursive;
+        --font-body: "Noto Sans SC", system-ui, sans-serif;
+        --header-divider-h: calc(3 * var(--border-w) + 2 * var(--pixel));
+        --header-bottom-reserve: calc(var(--header-divider-h) + var(--btn-hard) + 12px);
+        --font-mono: "JetBrains Mono", monospace;
+
+        --bg-root: var(--bg);
+        --bg-surface: var(--bg-alt);
+        --bg-elevated: var(--bg-alt);
+        --bg-inset: var(--bg);
+        --border: var(--fg);
+        --border-strong: var(--fg);
+        --border-focus: var(--fg);
+        --text: var(--fg);
+        --text-secondary: var(--fg);
+        --text-muted: var(--fg);
+        --accent: var(--fg);
+        --accent-hover: var(--fg);
+        --accent-light: var(--fg-invert);
+        --accent-glow: transparent;
+        --accent-bg: var(--bg-alt);
+        /* 历史任务列表与工具栏共用的滚动区外侧留白（与按钮硬阴影同量级） */
+        --history-strip-pad-inline-end: calc(var(--btn-hard) + 6px);
+        --success: var(--fg);
+        --success-bg: transparent;
+        --error: #c62828;
+        --error-bg: transparent;
+        --warning: var(--fg);
+        --warning-bg: transparent;
+        --info: var(--fg);
+        --info-bg: transparent;
+        --building: var(--fg);
+        --building-bg: transparent;
+        --radius: 0;
+        --radius-lg: 0;
+        --shadow-sm: none;
+        --shadow: none;
+        --shadow-md: none;
+        --shadow-glow: none;
+        --transition: none;
+        --font-display: var(--font-pixel);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        border-radius: 0 !important;
+      }
+
+      body {
+        font-family: var(--font-body);
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.5;
+        min-height: 100vh;
+      }
+
+      ::selection {
+        background: var(--fg);
+        color: var(--bg);
+      }
+
+      #app-root {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+
+      @keyframes blink-anim {
+        0%, 49% { opacity: 1; }
+        50%, 100% { opacity: 0; }
+      }
+      .blink {
+        animation: blink-anim 1s steps(1, end) infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .blink {
+          animation: none !important;
+          opacity: 1 !important;
+        }
+      }
+
+      /* 历史任务「进行中」：闪烁实心方块（替代字符 "_"） */
+      .history-work-indicator {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        flex-shrink: 0;
+        background: var(--fg);
+        vertical-align: middle;
+      }
+
+      @keyframes dots-anim {
+        0% { width: 0; }
+        25% { width: 1ch; }
+        50% { width: 2ch; }
+        75%, 100% { width: 3ch; }
+      }
+      .dots::after {
+        content: "...";
+        display: inline-block;
+        overflow: hidden;
+        vertical-align: bottom;
+        font-family: var(--font-mono);
+        animation: dots-anim 1s steps(1, end) infinite;
+      }
+
+      .pixel-border {
+        border: var(--border-w) solid var(--fg);
+        box-shadow: var(--pixel) var(--pixel) 0 var(--fg);
+      }
+      .pixel-border-bottom {
+        border-bottom: var(--border-w) solid var(--fg);
+        box-shadow: 0 var(--pixel) 0 var(--fg);
+      }
+      .pixel-border-top {
+        border-top: var(--border-w) solid var(--fg);
+        box-shadow: 0 calc(-1 * var(--pixel)) 0 var(--fg);
+      }
+      .pixel-border-left {
+        border-left: var(--border-w) solid var(--fg);
+        box-shadow: calc(-1 * var(--pixel)) 0 0 var(--fg);
+      }
+      .pixel-border-right {
+        border-right: var(--border-w) solid var(--fg);
+        box-shadow: var(--pixel) 0 0 var(--fg);
+      }
+
+      /* 扫描线：避免 CSS gradient，使用 tiling SVG 竖线纹理 */
+      .scanlines::after {
+        content: "";
+        pointer-events: none;
+        position: absolute;
+        inset: 0;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h4v1H0zm0 2h4v1H0z' fill='%231a1a2e' fill-opacity='.25'/%3E%3C/svg%3E");
+        opacity: 0.04;
+      }
+      .scanlines {
+        position: relative;
+      }
+
+      .pixel-label {
+        font-family: var(--font-body);
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+
+      .pixel-input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 2px solid var(--fg);
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-body);
+        font-size: 14px;
+        transition: none;
+      }
+
+      button.pixel-btn {
+        font-family: var(--font-body);
+      }
+
+      button.pixel-btn-sm {
+        font-family: var(--font-body);
+      }
+
+      .pixel-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 24px;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: none;
+        border: var(--border-w) solid var(--fg);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-light);
+        background: var(--btn-face);
+        color: var(--fg);
+        cursor: pointer;
+        transition: none;
+      }
+      .pixel-btn:hover:not(:disabled) {
+        background: var(--fg);
+        color: var(--btn-face);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-warm);
+      }
+      .pixel-btn:active:not(:disabled) {
+        box-shadow: none;
+        transform: translate(var(--btn-hard), var(--btn-hard));
+      }
+      .pixel-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .pixel-btn-sm {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: none;
+        border: var(--border-w) solid var(--fg);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-light);
+        background: var(--btn-face);
+        color: var(--fg);
+        cursor: pointer;
+        transition: none;
+      }
+      .pixel-btn-sm:hover:not(:disabled) {
+        background: var(--fg);
+        color: var(--btn-face);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-warm);
+      }
+      .pixel-btn-sm:active:not(:disabled) {
+        box-shadow: none;
+        transform: translate(var(--btn-hard), var(--btn-hard));
+      }
+      .pixel-btn-sm:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      /* ── Header ──────────────────────────────────────── */
+      .app-header {
+        position: sticky;
+        top: 0;
+        /* 下边为硬阴影 + 双线分隔留空；上边补偿同等「视觉重量」，避免整行贴在顶栏上半截 */
+        padding: calc(var(--header-bottom-reserve) - var(--header-divider-h)) 28px var(--header-bottom-reserve) 28px;
+        min-height: calc(44px + var(--header-bottom-reserve) + (var(--header-bottom-reserve) - var(--header-divider-h)));
+        height: auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0;
+        z-index: 100;
+        gap: 16px;
+        background: var(--bg);
+        color: var(--fg);
+        border-bottom: none;
+        overflow: visible;
+      }
+      /* 顶栏底边：固定三条等粗分割线与两道夹缝；单伪元素 + box-shadow，避免双线/夹条错位叠成一坨 */
+      .app-header::before {
+        content: none;
+      }
+      .app-header::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: var(--border-w);
+        pointer-events: none;
+        z-index: 10;
+        background-color: var(--fg);
+        box-shadow:
+          0 calc(-1 * (var(--pixel) + var(--border-w))) 0 0 var(--fg),
+          0 calc(-1 * (2 * var(--pixel) + 2 * var(--border-w))) 0 0 var(--fg);
+      }
+      /* 顶栏标题：与 `.pixel-btn`（「选择 PDF」）同族；字号维持放大档，700 加粗 */
+      .app-brand-label {
+        font-family: var(--font-body);
+        font-size: clamp(24px, 3.5vw, 36px);
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: none;
+        line-height: 1.25;
+        margin: 0;
+        color: var(--fg);
+      }
+      .header-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .header-config-btn.active {
+        background: var(--fg);
+        color: var(--btn-face);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-warm);
+      }
+
+      .header-brand-block {
+        flex: 0 1 auto;
+        min-width: 0;
+      }
+      .header-workspace-row {
+        display: none;
+        flex: 1;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-width: 0;
+      }
+      #app-root.has-job .header-brand-block {
+        display: none;
+      }
+      #app-root.has-job .header-workspace-row {
+        display: flex;
+      }
+      .header-ws-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+      }
+      .header-ws-caret {
+        font-family: var(--font-pixel);
+        font-size: 10px;
+        color: var(--fg);
+        flex-shrink: 0;
+      }
+      .header-ws-title {
+        font-family: var(--font-pixel);
+        font-size: clamp(7px, 1vw, 9px);
+        letter-spacing: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+      }
+      .header-ws-status-symbol {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .header-ws-center {
+        flex: 0 0 auto;
+        text-align: center;
+      }
+      .header-ws-pages {
+        font-family: var(--font-pixel);
+        font-size: 8px;
+        letter-spacing: 2px;
+        opacity: 0.7;
+      }
+      .header-ws-right {
+        display: flex;
+        gap: 8px;
+        flex-shrink: 0;
+        align-items: center;
+      }
+      /* 任务视图：breadcrumb 不写顶栏（见下方）；仅保留「首页」快捷返回。 */
+      #app-root.has-job .header-ws-left,
+      #app-root.has-job .header-ws-center {
+        display: none !important;
+      }
+
+      .history-panel.panel {
+        border: none;
+        box-shadow: none;
+        background: transparent;
+      }
+      .panel {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 0;
+        box-shadow: var(--shadow);
+      }
+      /* `.panel` 在下方定义，会覆盖较早的 `.pixel-border` box-shadow；带像素格的卡片需显式恢复 */
+      .panel.pixel-border {
+        border: var(--border-w) solid var(--fg);
+        box-shadow: var(--pixel) var(--pixel) 0 var(--fg);
+      }
+
+      /* ── History Panel ───── */
+      .history-panel {
+        margin: 16px 20px 0;
+        overflow: hidden;
+        opacity: 1;
+        transform: translateY(0);
+        transform-origin: top center;
+        transition: none;
+        will-change: opacity, transform;
+      }
+      .history-panel.collapsed {
+        opacity: 0;
+        transform: translateY(-6px);
+        margin-top: 0;
+        margin-bottom: 0;
+        border: none;
+        box-shadow: none;
+        pointer-events: none;
+      }
+      .history-panel[hidden] {
+        display: none;
+      }
+      .config-panel .config-inner {
+        padding: 22px 24px;
+      }
+      .history-inner { padding: 22px 24px; }
+      .config-inner .section-title,
+      .history-inner .section-title {
+        font-family: var(--font-display);
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        letter-spacing: -0.01em;
+      }
+      .section-title::before {
+        content: "";
+        width: 3px;
+        height: 14px;
+        background: var(--accent);
+        border-radius: 0;
+      }
+      .history-panel {
+        animation: none;
+      }
+      .history-toolbar {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 18px;
+        /* 与 `.history-list` 同一右内边距，顶部「N 条」与下方卡片右边线（含预留）对齐 */
+        padding-inline-end: var(--history-strip-pad-inline-end);
+        box-sizing: border-box;
+      }
+      /* 左侧占满剩余宽度；计数用 margin-inline-start:auto 贴齐内容区右缘（避免 grid+inline-flex 列尾留白） */
+      .history-toolbar > div:first-child {
+        flex: 1 1 0%;
+        min-width: 0;
+      }
+      .history-toolbar .history-count {
+        flex: 0 0 auto;
+        margin-inline-start: auto;
+      }
+      .history-toolbar .section-title {
+        margin-bottom: 6px;
+      }
+      .history-section-pixel-title {
+        font-family: var(--font-pixel) !important;
+        font-size: 10px !important;
+        letter-spacing: 3px !important;
+        line-height: 1.5;
+      }
+      /* 历史任务面板：与「选择 PDF」一致使用 Noto Sans SC，可读性更接近正文字号 */
+      .history-panel .history-toolbar .history-section-pixel-title {
+        font-family: var(--font-body) !important;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.12em !important;
+        line-height: 1.35 !important;
+      }
+      .history-section-pixel-title::before {
+        display: none !important;
+      }
+      .history-caption {
+        color: var(--text-muted);
+        font-size: 13px;
+        font-family: var(--font-body);
+        line-height: 1.5;
+      }
+      /* 「N 条」：与 `.pixel-btn-sm` 同色块硬阴影体系一致 */
+      .history-count {
+        flex-shrink: 0;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-body);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        padding: 7px 15px;
+        border: var(--border-w) solid var(--fg);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-light);
+        background: var(--btn-face);
+        color: var(--fg);
+      }
+      .history-list {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-height: 460px;
+        overflow-y: auto;
+        /* 末尾行 `.pixel-btn-sm` 的 5px 硬阴影易被滚动裁剪，留出余量避免「少一截阴影」错觉 */
+        padding-bottom: calc(var(--btn-hard) + 10px);
+        padding-inline-end: var(--history-strip-pad-inline-end);
+        box-sizing: border-box;
+      }
+      .history-empty {
+        padding: 28px 22px;
+        text-align: center;
+        border: var(--border-w) dashed var(--fg);
+        background: var(--bg-surface);
+        color: var(--text-muted);
+        font-family: var(--font-body);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      .history-status-symbol {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: 13px;
+        margin-right: 12px;
+        min-width: 14px;
+      }
+      .history-item.history-item-failed {
+        border-style: dashed !important;
+      }
+      .history-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        align-items: center;
+        padding: 16px 18px;
+        border: var(--border-w) solid var(--fg);
+        box-shadow: var(--pixel) var(--pixel) 0 var(--fg);
+        background: var(--bg);
+        color: var(--fg);
+      }
+      .history-item:hover {
+        filter: brightness(0.97);
+      }
+      .history-item.history-item-active {
+        background: var(--bg-alt);
+        color: var(--fg);
+        border-style: solid;
+        box-shadow:
+          var(--pixel) var(--pixel) 0 var(--fg),
+          calc(2 * var(--pixel)) calc(2 * var(--pixel)) 0 var(--fg);
+      }
+      .history-item.history-item-active .history-item-title {
+        color: var(--text);
+      }
+      .history-item.history-item-active .history-item-meta,
+      .history-item.history-item-active .history-item-detail {
+        color: var(--text-secondary);
+        opacity: 1;
+      }
+      .history-item-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .history-item-heading {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .history-item-title {
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .history-item-current {
+        flex-shrink: 0;
+        font-family: var(--font-body);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        padding: 5px 10px;
+        border: var(--border-w) dashed var(--fg);
+        background: var(--bg-alt);
+        color: var(--fg);
+      }
+      .history-item.history-item-active .history-item-current {
+        border-color: var(--fg);
+        border-style: dashed;
+        background: var(--btn-face);
+        color: var(--fg);
+      }
+      .history-item-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+      .history-item-detail {
+        color: var(--text-muted);
+      }
+      .history-item-warning {
+        color: var(--warning);
+      }
+      .history-item-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+        flex-shrink: 0;
+        align-self: center;
+      }
+      .form-grid-4 {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+      .form-grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+      }
+      .form-grid-1-3 {
+        display: grid;
+        grid-template-columns: 1fr 3fr;
+        gap: 14px;
+      }
+      .form-group { display: flex; flex-direction: column; gap: 5px; }
+      .form-group .form-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .form-input, .form-textarea {
+        padding: 9px 12px;
+        border: 1px solid var(--border);
+        border-radius: 0;
+        font-size: 13px;
+        font-family: var(--font-body);
+        color: var(--text);
+        background: var(--bg-inset);
+        transition: none;
+        outline: none;
+      }
+      .form-input:focus, .form-textarea:focus {
+        border-color: var(--border-focus);
+        box-shadow: none;
+      }
+      .form-input::placeholder, .form-textarea::placeholder {
+        color: var(--text-muted);
+      }
+      .form-input[type="number"]::-webkit-inner-spin-button,
+      .form-input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .form-input[type="number"] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+      select.form-input {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        padding-right: 32px;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%231a1a2e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+        cursor: pointer;
+      }
+      .form-textarea {
+        min-height: 80px;
+        resize: vertical;
+        font-size: 13px;
+        font-family: var(--font-mono);
+        line-height: 1.6;
+      }
+      .form-input.pixel-input,
+      .form-textarea.pixel-input,
+      select.form-input.pixel-input {
+        padding: 10px 12px;
+        border: 2px solid var(--fg);
+        background: var(--bg);
+        color: var(--fg);
+        font-size: 14px;
+        font-family: var(--font-body);
+        box-shadow: none;
+      }
+      .form-textarea.pixel-input {
+        font-family: var(--font-mono);
+        min-height: 80px;
+        line-height: 1.6;
+      }
+      .form-input.pixel-input:focus,
+      .form-textarea.pixel-input:focus,
+      select.form-input.pixel-input:focus {
+        border-color: var(--fg);
+        box-shadow: none;
+        outline: none;
+      }
+      select.form-input.pixel-input {
+        /* 整块实底 + clip，规避 Win/Chrome 在 appearance:none 下未覆盖区域的斜线底纹 */
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        background-color: var(--btn-face);
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%231a1a2e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+        background-clip: padding-box;
+        color-scheme: light;
+      }
+
+      .form-row { margin-top: 14px; }
+      .form-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 18px;
+      }
+      .config-test-status {
+        min-height: 18px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .config-test-status.is-success { color: var(--success); }
+      .config-test-status.is-error { color: var(--error); }
+      .config-test-status.is-pending { color: var(--info); }
+      .has-key-badge {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        box-sizing: border-box;
+        font-family: var(--font-body);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        padding: 5px 12px;
+        border: var(--border-w) dashed var(--fg);
+        background: var(--btn-face);
+        color: var(--fg);
+        box-shadow: none;
+      }
+      .has-key-badge::before {
+        content: "✓";
+        font-weight: 700;
+        font-size: 11px;
+        line-height: 1;
+      }
+      .has-key-badge.no-key {
+        background: var(--btn-face);
+        color: var(--fg);
+        opacity: 0.92;
+        border-style: dashed;
+      }
+      .has-key-badge.no-key::before {
+        content: "—";
+        font-family: var(--font-mono);
+        font-weight: 500;
+      }
+
+      /* ── Buttons ──────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-radius: 0;
+        font-size: 13px;
+        font-weight: 500;
+        font-family: var(--font-body);
+        cursor: pointer;
+        transition: none;
+        border: 1px solid var(--border);
+        background: var(--bg-alt);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .btn:hover {
+        background: var(--bg);
+        color: var(--text);
+        border-color: var(--border-strong);
+      }
+      .btn:active { transform: scale(0.97); }
+      .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+      .btn-primary {
+        background: var(--fg);
+        color: var(--bg);
+        border-color: var(--fg);
+        font-weight: 600;
+      }
+      .btn-primary:hover {
+        background: var(--bg);
+        border-color: var(--fg);
+        color: var(--fg);
+        box-shadow: none;
+      }
+      .btn-success {
+        background: var(--fg);
+        color: var(--bg);
+        border-color: var(--fg);
+        font-weight: 600;
+      }
+      .btn-success:hover {
+        background: var(--bg);
+        border-color: var(--fg);
+        color: var(--fg);
+        box-shadow: none;
+      }
+      .btn-sm { padding: 5px 11px; font-size: 12px; }
+      .build-output-menu {
+        position: relative;
+      }
+      .build-output-menu-panel {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        min-width: 220px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px;
+        border-radius: 0;
+        border: var(--border-w) solid var(--fg);
+        background: var(--bg-alt);
+        box-shadow: none;
+        z-index: 50;
+      }
+      .build-output-menu-option {
+        width: 100%;
+        text-align: left;
+        border-radius: 0;
+        border: var(--border-w) solid var(--fg);
+        background: var(--btn-face);
+        color: var(--fg);
+        font-size: 12px;
+        font-family: var(--font-body);
+        padding: 9px 10px;
+        cursor: pointer;
+        transition: none;
+        box-shadow: none;
+      }
+      .build-output-menu-option:hover {
+        background: var(--fg);
+        color: var(--btn-face);
+        border-color: var(--fg);
+        box-shadow: none;
+      }
+
+      /* ── Status Chips ─────────────────────────────────── */
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 0;
+        font-size: 11px;
+        font-weight: 600;
+        font-family: var(--font-display);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
+        border: 1px solid transparent;
+      }
+      .status-chip.status-idle {
+        background: transparent;
+        color: var(--text-muted);
+        border-color: transparent;
+        padding-left: 0;
+        padding-right: 0;
+      }
+      .status-chip.status-extracting {
+        background: var(--info-bg);
+        color: var(--info);
+        border-color: transparent;
+      }
+      .status-chip.status-extracted {
+        background: var(--accent-bg);
+        color: var(--accent);
+        border-color: transparent;
+      }
+      .status-chip.status-building {
+        background: var(--building-bg);
+        color: var(--building);
+        border-color: transparent;
+      }
+      .status-chip.status-uploading {
+        background: var(--accent-bg);
+        color: var(--accent);
+        border-color: transparent;
+      }
+      .status-chip.status-previewing {
+        background: var(--info-bg);
+        color: var(--info);
+        border-color: transparent;
+      }
+      .status-chip.status-prepared {
+        background: var(--warning-bg);
+        color: var(--warning);
+        border-color: transparent;
+      }
+      .status-chip.status-ready {
+        background: var(--success-bg);
+        color: var(--success);
+        border-color: transparent;
+      }
+      .status-chip.status-done {
+        background: transparent;
+        color: var(--fg);
+        border-color: transparent;
+      }
+      .status-chip.status-failed {
+        background: var(--error-bg);
+        color: var(--error);
+        border-color: transparent;
+      }
+      .status-dot {
+        width: 7px; height: 7px;
+        border-radius: 0;
+        background: currentColor;
+      }
+      .status-chip.status-extracting .status-dot,
+      .status-chip.status-previewing .status-dot,
+      .status-chip.status-building .status-dot {
+        animation: none;
+      }
+
+      /* ── Config Panel（Header 下方内联折叠） ──────────── */
+      .config-panel {
+        margin: 16px 20px 0;
+        overflow: hidden;
+        opacity: 1;
+        transform: translateY(0);
+        transform-origin: top center;
+        transition: none;
+      }
+      .config-panel.collapsed {
+        opacity: 0;
+        transform: translateY(-6px);
+        margin-top: 0;
+        margin-bottom: 0;
+        border: none;
+        box-shadow: none;
+        pointer-events: none;
+      }
+      .config-panel[hidden] {
+        display: none;
+      }
+
+      .config-inner > .config-section-title {
+        font-family: var(--font-body);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        line-height: 1.35;
+        margin: 0 0 22px 0;
+        color: var(--fg);
+      }
+      /* 表单 label 与控件呼吸感 */
+      .config-inner .form-group {
+        gap: 8px;
+      }
+      /* 运行时配置表单：标签略大于全局 pixel-label（仅作用于本面板） */
+      .config-inner .pixel-label {
+        font-size: 13px;
+        letter-spacing: 0.08em;
+      }
+      /* 加载/测试/保存：横向 flex 自宽度，不搞满屏四等分 */
+      .config-inner .form-actions {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 14px;
+        margin-top: 22px;
+      }
+      .config-actions-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        max-width: 100%;
+      }
+      .config-actions-buttons > button {
+        flex: 0 0 auto;
+      }
+      /* 与其它三个一致为白底；仅略强调字重（悬停仍为通用 .pixel-btn-sm 反色） */
+      .config-inner .config-save-primary {
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+      .config-actions-extra {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      }
+
+      /* ── Workspace（两栏 + 可拖拽分隔线） ─────────────── */
+      .workspace-scroll {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .workspace {
+        --workspace-divider-width: 14px;
+        /* 右侧顶栏单行容纳「状态 + 四至五枚 compact 按钮」；与脚本 clampWorkspaceSplitRatio 常量同步 */
+        --workspace-min-left-pane: 320px;
+        --workspace-min-right-pane: 600px;
+        --workspace-left-width: calc((100% - var(--workspace-divider-width)) * 0.5);
+        display: grid;
+        grid-template-columns: minmax(var(--workspace-min-left-pane), var(--workspace-left-width)) var(--workspace-divider-width)
+          minmax(var(--workspace-min-right-pane), 1fr);
+        grid-template-rows: auto 1fr;
+        column-gap: 0;
+        margin: 16px 20px;
+        flex: 1;
+        min-height: 0;
+        align-items: stretch;
+        /* 左预览最窄 + 右编辑区单行顶栏最小宽度：窄视口依赖 .workspace-scroll 横向滚动 */
+        min-width: calc(
+          var(--workspace-min-left-pane) + var(--workspace-min-right-pane) + var(--workspace-divider-width)
+        );
+      }
+      .workspace-col-left,
+      .workspace-col-right {
+        grid-row: 1 / -1;
+        display: grid;
+        grid-template-rows: subgrid;
+        min-width: 0;
+        min-height: 0;
+      }
+      .workspace-col-left {
+        grid-column: 1;
+      }
+      .workspace-col-right {
+        grid-column: 3;
+      }
+      .workspace-col-left > .pane-header {
+        grid-row: 1;
+        background: var(--bg-alt);
+        color: var(--fg);
+        border-bottom: var(--border-w) dashed var(--fg);
+      }
+
+      .workspace-col-left > .pdf-pane {
+        grid-row: 2;
+        min-height: 0;
+      }
+      .workspace-col-right > .editor-status-bar {
+        grid-row: 1;
+        background: var(--bg-alt);
+        color: var(--fg);
+        border-bottom: var(--border-w) dashed var(--fg);
+        /* 下拉「合并」菜单向下溢出时不要被裁切，且须叠在 .editor-pane 之上 */
+        position: relative;
+        z-index: 5;
+        overflow: visible;
+      }
+
+      .workspace-col-right > .editor-pane {
+        grid-row: 2;
+        min-height: 0;
+        position: relative;
+        z-index: 1;
+      }
+      .workspace > .workspace-col-left,
+      .workspace > .workspace-col-right {
+        min-width: 0;
+        min-height: 0;
+      }
+      .workspace-divider {
+        grid-column: 2;
+        grid-row: 1 / -1;
+        position: relative;
+        align-self: stretch;
+        width: var(--workspace-divider-width);
+        border: none;
+        background: transparent;
+        cursor: col-resize;
+        touch-action: none;
+        user-select: none;
+        padding: 0;
+      }
+      .workspace-divider::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 8px;
+        height: 76px;
+        transform: translate(-50%, -50%);
+        border: var(--border-w) solid var(--fg);
+        background: var(--bg-alt);
+        box-shadow: var(--pixel) var(--pixel) 0 var(--fg);
+      }
+      body.workspace-resizing {
+        cursor: col-resize !important;
+      }
+      body.workspace-resizing .workspace,
+      body.workspace-resizing .workspace * {
+        cursor: col-resize !important;
+        user-select: none !important;
+      }
+
+      /* Workspace：相对主色略深的同系顶栏（--bg-alt）+ 浅正文，顶栏与正文分界为虚线 */
+      .workspace .pdf-pane {
+        background: var(--bg);
+      }
+      .workspace .editor-pane {
+        background: var(--bg);
+      }
+
+      .workspace-col-left > .pane-header h2 {
+        font-family: var(--font-body);
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: none;
+        line-height: 1;
+        color: var(--fg);
+      }
+
+      .workspace-col-right > .editor-status-bar .progress-track-inline {
+        background: var(--bg);
+      }
+
+      .workspace-col-right > .editor-status-bar .status-chip {
+        font-family: var(--font-body);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: none;
+        line-height: 1;
+      }
+
+      .workspace-col-right > .editor-status-bar .status-chip .status-dot {
+        width: 1em;
+        height: 1em;
+        flex-shrink: 0;
+      }
+      .workspace-col-right > .editor-status-bar .status-chip:not(.status-idle) {
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      .control-job-stats {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 0;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        flex-shrink: 0;
+      }
+      .control-job-stats-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .control-extraction-dots-row {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 0;
+        font-family: var(--font-body);
+        font-size: 12px;
+      }
+      .control-extraction-dots-row.is-visible {
+        display: flex;
+      }
+
+      a.pixel-btn,
+      a.pixel-btn-sm {
+        text-decoration: none;
+        box-sizing: border-box;
+      }
+      a.pixel-btn.is-disabled,
+      a.pixel-btn-sm.is-disabled {
+        opacity: 0.4;
+        pointer-events: none;
+        cursor: not-allowed;
+      }
+
+      /* ── PDF Pane ─────────────────────────────────────── */
+      .pdf-pane {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .editor-pane .editor-textarea {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-mono);
+        min-height: 0;
+      }
+      .editor-pane .editor-textarea:focus {
+        background: var(--bg);
+      }
+      .editor-pane .editor-textarea:disabled {
+        background: var(--bg-alt);
+        color: var(--fg);
+        opacity: 0.72;
+      }
+      .editor-pane .editor-textarea::placeholder {
+        color: var(--fg);
+        opacity: 0.42;
+      }
+      .editor-pane .page-error-msg {
+        color: #c62828;
+        background: transparent;
+        border-bottom: 1px dashed var(--fg);
+      }
+      .editor-pane .page-status-bar {
+        background: transparent;
+        color: var(--fg);
+        border-bottom: none;
+      }
+      .editor-pane .page-status-bar.status-done,
+      .editor-pane .page-status-bar.status-failed,
+      .editor-pane .page-status-bar.status-extracting,
+      .editor-pane .page-status-bar.status-pending {
+        background: transparent;
+        color: var(--fg);
+        border-bottom: none;
+      }
+      .editor-pane .editor-status-bar {
+        background: var(--bg);
+        border-bottom: var(--border-w) solid var(--fg);
+      }
+      .pane-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .pane-header h2 {
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .editor-pane .pane-header h2 {
+        font-family: var(--font-pixel);
+        font-size: 8px;
+        letter-spacing: 3px;
+        line-height: 1.6;
+        font-weight: 400;
+        color: var(--fg);
+        text-transform: none;
+      }
+      .pane-header .pane-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .pdf-viewer-container {
+        flex: 1;
+        overflow: auto;
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        background: var(--bg);
+        isolation: isolate;
+        position: relative;
+        min-height: 400px;
+        padding: 18px;
+      }
+      .pdf-viewer-container::before {
+        content: "";
+        position: absolute;
+        inset: 18px;
+        border-radius: 0;
+        border: none;
+        background: transparent;
+        box-shadow: none;
+        pointer-events: none;
+      }
+      .pdf-stage {
+        position: relative;
+        flex: 1 1 auto;
+        align-self: stretch;
+        width: 100%;
+        min-height: 320px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+      }
+      .pdf-stage.is-empty {
+        padding: 6px;
+      }
+      .pdf-stage.is-empty::before,
+      .pdf-stage.is-empty::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: auto;
+        max-width: min(280px, calc(100% - 40px));
+        height: min(260px, calc(100% - 72px));
+        aspect-ratio: 1 / 1.12;
+        border-radius: 0;
+        transform-origin: center center;
+        pointer-events: none;
+        background: var(--bg-alt);
+        border: 1px solid var(--fg);
+        box-shadow: var(--pixel) var(--pixel) 0 var(--fg);
+      }
+      .pdf-stage.is-empty::before {
+        transform: translate(-50%, -50%) rotate(-4deg);
+        z-index: 0;
+      }
+      .pdf-stage.is-empty::after {
+        transform: translate(-50%, -50%) rotate(2.6deg);
+        z-index: 1;
+      }
+      .pdf-viewer-container canvas {
+        display: block;
+        max-width: 100%;
+        width: auto;
+        height: auto;
+        background: #ffffff;
+        border-radius: 0;
+        box-shadow: var(--pixel) var(--pixel) 0 var(--fg);
+      }
+      .pdf-viewer-container canvas.hidden {
+        display: none;
+      }
+
+      /* ── PDF Placeholder ──────────────────────────────── */
+      .pdf-placeholder {
+        position: absolute;
+        inset: 14px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        gap: 12px;
+        padding: 32px 24px;
+        cursor: default;
+        z-index: 2;
+      }
+      .pdf-placeholder.hidden { display: none; }
+      .pdf-placeholder .placeholder-icon {
+        font-size: 42px;
+        opacity: 0.28;
+        filter: grayscale(1);
+      }
+      .pdf-placeholder .placeholder-title {
+        font-family: var(--font-body);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fg);
+        letter-spacing: 2px;
+        margin-top: 4px;
+      }
+      .pdf-status-hint {
+        position: absolute;
+        left: 30px;
+        right: 30px;
+        bottom: 30px;
+        z-index: 4;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 11px 14px;
+        border-radius: 0;
+        /* 粗虚线框：相对原先细实线更易辨认加载态，且不依赖 box-shadow */
+        border: var(--border-w) dashed var(--fg);
+        background: var(--bg-alt);
+        box-shadow: var(--shadow-md);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 500;
+        pointer-events: none;
+      }
+      .pdf-status-hint.hidden { display: none; }
+      .pdf-viewer-container.pdf-status-active .pdf-status-hint {
+        left: 50%;
+        top: 50%;
+        right: auto;
+        bottom: auto;
+        transform: translate(-50%, -50%);
+        width: min(420px, calc(100% - 48px));
+      }
+      .status-hint-spinner {
+        width: 14px;
+        height: 14px;
+        border-radius: 0;
+        border: 2px solid var(--fg);
+        border-top-color: var(--fg);
+        flex-shrink: 0;
+        animation: none;
+      }
+
+      /* ── PDF Footer Nav ───────────────────────────────── */
+      .pdf-footer-nav {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px 18px;
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
+        background: var(--bg-surface);
+      }
+      .page-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .page-nav .btn-nav {
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: var(--border-w) solid var(--fg);
+        border-radius: 0;
+        background: var(--btn-face);
+        cursor: pointer;
+        font-size: 11px;
+        color: var(--text-muted);
+        transition: none;
+        box-shadow: none;
+      }
+      .page-nav .btn-nav:hover {
+        background: var(--fg);
+        color: var(--btn-face);
+        border-color: var(--fg);
+        box-shadow: none;
+      }
+      .page-nav .btn-nav:active:not(:disabled) {
+        box-shadow: none;
+        transform: translate(var(--btn-hard), var(--btn-hard));
+      }
+      .page-nav .btn-nav:disabled { opacity: 0.25; cursor: not-allowed; }
+      .page-nav select {
+        height: 30px;
+        min-width: 132px;
+        max-width: 200px;
+        padding: 0 30px 0 12px;
+        border: var(--border-w) solid var(--fg);
+        border-radius: 0;
+        font-size: 11px;
+        font-weight: 600;
+        font-family: var(--font-body);
+        letter-spacing: 0.06em;
+        background-color: var(--btn-face);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%231a1a2e' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        color: var(--fg);
+        outline: none;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        box-shadow: none;
+      }
+      .page-nav select:focus {
+        border-color: var(--fg);
+        outline: none;
+        background-color: var(--btn-face);
+        color: var(--fg);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%231a1a2e' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+      }
+      .page-nav select:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+        background-color: var(--bg-alt);
+        color: var(--text-muted);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%231a1a2e' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+      }
+      .btn-icon {
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: var(--border-w) solid var(--fg);
+        border-radius: 0;
+        background: var(--btn-face);
+        cursor: pointer;
+        font-size: 14px;
+        color: var(--text-muted);
+        transition: none;
+        flex-shrink: 0;
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-light);
+      }
+      .btn-icon svg {
+        display: block;
+        pointer-events: none;
+      }
+      .btn-icon:hover {
+        background: var(--fg);
+        color: var(--btn-face);
+        border-color: var(--fg);
+        box-shadow: var(--btn-hard) var(--btn-hard) 0 0 var(--btn-shadow-hard-warm);
+      }
+      .btn-icon:active {
+        box-shadow: none;
+        transform: translate(var(--btn-hard), var(--btn-hard));
+      }
+
+      /* ── Editor Pane ──────────────────────────────────── */
+      .editor-pane {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .editor-status-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 18px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        gap: 12px;
+        flex-wrap: nowrap;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .editor-status-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 0 1 auto;
+        min-width: 0;
+        flex-wrap: nowrap;
+      }
+      .editor-status-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 8px;
+        justify-content: flex-end;
+        flex-shrink: 0;
+        margin-left: auto;
+      }
+      /* 顶栏 `.pixel-btn-sm`：固定外框高度，避免不同标签/下拉壳子导致的视觉参差 */
+      .editor-status-actions > button.pixel-btn-sm,
+      .editor-status-actions .build-output-menu button.pixel-btn-sm,
+      .editor-status-actions .editor-status-phase-actions > button.pixel-btn-sm {
+        height: 34px;
+        min-height: 34px;
+        max-height: 34px;
+        padding: 0 14px;
+        line-height: 1;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .editor-status-actions .editor-status-phase-actions > a.pixel-btn-sm {
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 34px;
+        min-height: 34px;
+        max-height: 34px;
+        padding: 0 14px;
+        line-height: 1;
+        white-space: nowrap;
+        flex-shrink: 0;
+        text-decoration: none;
+      }
+      .editor-status-phase-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .editor-status-actions .build-output-menu {
+        display: inline-flex;
+        align-items: stretch;
+      }
+      .control-job-stats-wrap {
+        flex-shrink: 0;
+      }
+      .editor-pane #page-editor-section > .page-status-bar:not(.hidden) {
+        padding: 10px 18px 6px;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        border-bottom: none;
+      }
+      .editor-pane #page-editor-section > .page-status-bar.status-pending:not(.hidden) {
+        color: var(--text-muted);
+      }
+      .progress-inline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        max-width: 220px;
+      }
+      .progress-track-inline {
+        flex: 1;
+        height: 4px;
+        background: var(--bg-alt);
+        border-radius: 0;
+        overflow: hidden;
+        min-width: 60px;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--fg);
+        border-radius: 0;
+        transition: none;
+        width: 0%;
+        position: relative;
+      }
+      .progress-fill::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        display: none;
+      }
+      .progress-fill.complete {
+        background: var(--fg);
+      }
+      .progress-label-inline {
+        font-size: 11px;
+        font-weight: 600;
+        font-family: var(--font-mono);
+        color: var(--text-muted);
+        white-space: nowrap;
+        min-width: 36px;
+        text-align: right;
+      }
+      .editor-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .editor-section.hidden { display: none; }
+      .page-status-bar {
+        padding: 8px 18px;
+        font-size: 12px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .page-status-bar.status-done {
+        background: var(--success-bg);
+        color: var(--success);
+        border-bottom-color: var(--fg);
+      }
+      .page-status-bar.status-failed {
+        background: var(--error-bg);
+        color: var(--error);
+        border-bottom-color: var(--fg);
+      }
+      .page-status-bar.status-extracting {
+        background: var(--info-bg);
+        color: var(--info);
+        border-bottom-color: var(--fg);
+      }
+      .page-status-bar.status-pending {
+        background: transparent;
+        color: var(--text-muted);
+      }
+      .editor-textarea {
+        flex: 1;
+        border: none;
+        outline: none;
+        padding: 18px;
+        font-size: 13px;
+        font-family: var(--font-mono);
+        line-height: 1.7;
+        resize: none;
+        background: var(--bg-inset);
+        color: var(--text);
+        min-height: 400px;
+        transition: none;
+      }
+      .editor-textarea::placeholder {
+        color: var(--text-muted);
+        font-family: var(--font-body);
+      }
+      .editor-textarea:focus {
+        background: var(--bg);
+      }
+      .editor-textarea:disabled {
+        background: var(--bg-alt);
+        color: var(--text-muted);
+      }
+      .page-error-msg {
+        padding: 8px 18px;
+        font-size: 12px;
+        color: var(--error);
+        background: var(--error-bg);
+        border-bottom: 1px solid var(--fg);
+        font-family: var(--font-mono);
+      }
+      .page-error-msg:empty { display: none; }
+
+      /* ── Events Log（与工作区卡片同一 brutalist 框 + PDF 栏顶同款排版） ── */
+      .events-section.panel.pixel-border {
+        background: var(--bg);
+      }
+      .events-section {
+        margin: 16px 20px 20px;
+        overflow: hidden;
+        animation: none;
+      }
+      .events-section > .events-pane-head {
+        cursor: pointer;
+        user-select: none;
+        width: 100%;
+        border: none;
+        background: var(--bg-alt);
+        color: var(--fg);
+        border-bottom: var(--border-w) dashed var(--fg);
+        text-align: left;
+        font: inherit;
+        appearance: none;
+        -webkit-appearance: none;
+      }
+      .events-section > .events-pane-head:hover {
+        background: var(--bg-alt);
+      }
+      .events-section > .events-pane-head h2 {
+        font-family: var(--font-body);
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: none;
+        line-height: 1;
+        color: var(--fg);
+        margin: 0;
+      }
+      .events-pane-chevron {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .events-pane-head .toggle-arrow {
+        font-size: 10px;
+        line-height: 1;
+        opacity: 0.65;
+        transition: none;
+      }
+      .events-pane-head.expanded .toggle-arrow {
+        transform: rotate(0deg);
+      }
+      .events-pane-head:not(.expanded) .toggle-arrow {
+        transform: rotate(-90deg);
+      }
+      pre.events-log {
+        font-family: var(--font-body);
+      }
+      .events-log {
+        margin: 0;
+        max-height: 260px;
+        overflow-y: auto;
+        overflow-x: auto;
+        padding: 14px 18px;
+        border: none;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-body);
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-radius: 0;
+      }
+
+      /* ── Hidden / SR-Only ─────────────────────────────── */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0,0,0,0);
+        border: 0;
+      }
+      .hidden { display: none !important; }
+
+      @media (max-width: 768px) {
+        .form-grid-4 { grid-template-columns: repeat(2, 1fr); }
+      }
+      @media (max-width: 480px) {
+        .form-grid-4, .form-grid-2, .form-grid-1-3 { grid-template-columns: 1fr; }
+        .app-header {
+          --header-bottom-reserve: calc(var(--header-divider-h) + var(--btn-hard) + 10px);
+          padding: calc(var(--header-bottom-reserve) - var(--header-divider-h)) 14px var(--header-bottom-reserve) 14px;
+          min-height: calc(40px + var(--header-bottom-reserve) + (var(--header-bottom-reserve) - var(--header-divider-h)));
+          height: auto;
+        }
+        .app-brand-label {
+          font-size: clamp(24px, 6.2vw, 32px);
+        }
+        .workspace, .config-panel, .history-panel, .events-section { margin-left: 10px; margin-right: 10px; }
+      }
+
+      /* ── Scrollbar ────────────────────────────────────── */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--fg); border-radius: 0; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--fg); opacity: 0.85; }
+
+      /* scrollbar for Firefox */
+      * { scrollbar-width: thin; scrollbar-color: var(--fg) transparent; }
+
+      /* ── Focus ring global ────────────────────────────── */
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-root">
+      <!-- ── Header ─────────────────────────── -->
+      <header class="app-header">
+        <div id="header-brand-block" class="header-brand-block">
+          <h1 class="app-brand-label">PDF 生成 Markdown 知识库</h1>
+        </div>
+        <div id="header-workspace-row" class="header-workspace-row">
+          <div class="header-ws-left">
+            <span class="header-ws-caret" aria-hidden="true">▸</span>
+            <span id="header-task-title" class="header-ws-title"></span>
+            <span id="header-task-status-symbol" class="header-ws-status-symbol" aria-hidden="true"></span>
+          </div>
+          <div class="header-ws-center">
+            <span id="header-page-indicator" class="header-ws-pages"></span>
+          </div>
+          <div class="header-ws-right">
+            <button id="header-back-home-btn" class="pixel-btn-sm" type="button">首页</button>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="toggle-history-btn" type="button" class="pixel-btn-sm">历史记录</button>
+          <button id="toggle-config-btn" class="pixel-btn-sm header-config-btn" type="button">配置</button>
+        </div>
+      </header>
+
+      <section class="panel config-panel collapsed pixel-border">
+        <form id="config-form" class="config-inner">
+          <h2 class="config-section-title">◆ 运 行 时 配 置</h2>
+          <div class="form-grid-4">
+            <label class="form-group">
+              <span class="form-label pixel-label">模型名称</span>
+              <select id="cfg-model-name" class="form-input pixel-input" required>
+                <option value="doubao-seed-2-0-lite-260215">doubao-seed-2-0-lite-260215</option>
+                <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215</option>
+              </select>
+            </label>
+            <label class="form-group">
+              <span class="form-label pixel-label">超时 (秒)</span>
+              <input id="cfg-timeout" class="form-input pixel-input" type="number" required />
+            </label>
+            <label class="form-group">
+              <span class="form-label pixel-label">DPI</span>
+              <input id="cfg-dpi" class="form-input pixel-input" type="number" required />
+            </label>
+            <label class="form-group">
+              <span class="form-label pixel-label">并发数</span>
+              <input id="cfg-concurrency" class="form-input pixel-input" type="number" required />
+            </label>
+          </div>
+          <div class="form-grid-1-3 form-row">
+            <label class="form-group">
+              <span class="form-label pixel-label">提取最大重试</span>
+              <input id="cfg-max-retries" class="form-input pixel-input" type="number" required />
+            </label>
+            <label class="form-group">
+              <span class="form-label pixel-label">API Key (仅写入)</span>
+              <input id="cfg-api-key" class="form-input pixel-input" type="password" placeholder="留空则保持现有" />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="form-group">
+              <span class="form-label pixel-label">提取 Prompt</span>
+              <textarea id="cfg-prompt" class="form-textarea pixel-input" required></textarea>
+            </label>
+          </div>
+          <div class="form-actions">
+            <div class="config-actions-buttons">
+              <button id="load-config-btn" class="pixel-btn-sm" type="button">加载配置</button>
+              <button id="restore-initial-config-btn" class="pixel-btn-sm" type="button">恢复默认设置</button>
+              <button id="test-config-btn" class="pixel-btn-sm" type="button">测试连接</button>
+              <button id="save-config-btn" class="pixel-btn-sm config-save-primary" type="submit">保存配置</button>
+            </div>
+            <div class="config-actions-extra">
+              <span id="config-has-key" class="has-key-badge"></span>
+              <span id="config-test-status" class="config-test-status" aria-live="polite"></span>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section id="history-panel" class="panel history-panel collapsed">
+        <div class="history-inner">
+          <div class="history-toolbar">
+            <div>
+              <div class="section-title history-section-pixel-title">◆ 历 史 任 务</div>
+              <div class="history-caption">按名称查看任务，点击进入或删除本地记录。</div>
+            </div>
+            <div id="history-count" class="history-count">0</div>
+          </div>
+          <div id="history-empty" class="history-empty">暂无历史任务</div>
+          <div id="history-list" class="history-list hidden"></div>
+        </div>
+      </section>
+
+      <!-- ── Workspace（两栏 + 分隔线） ─────────────────── -->
+      <div class="workspace-scroll">
+      <div id="workspace" class="workspace">
+        <div id="workspace-col-left" class="workspace-col workspace-col-left panel pixel-border">
+          <div class="pane-header pdf-pane-head">
+            <h2>PDF 预览</h2>
+            <button id="upload-pdf-header-btn" class="btn-icon" type="button" title="上传 PDF" aria-label="上传 PDF">
+              <!-- Hugeicons File Upload（与 @hugeicons/core-free-icons FileUploadIcon 路径一致） -->
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+                <path d="M4 12L4 14.5442C4 17.7892 4 19.4117 4.88607 20.5107C5.06508 20.7327 5.26731 20.9349 5.48933 21.1139C6.58831 22 8.21082 22 11.4558 22C12.1614 22 12.5141 22 12.8372 21.886C12.9044 21.8623 12.9702 21.835 13.0345 21.8043C13.3436 21.6564 13.593 21.407 14.0919 20.9081L18.8284 16.1716C19.4065 15.5935 19.6955 15.3045 19.8478 14.9369C20 14.5694 20 14.1606 20 13.3431V10C20 6.22876 20 4.34315 18.8284 3.17157C17.6569 2 15.7712 2 12 2M13 21.5V21C13 18.1716 13 16.7574 13.8787 15.8787C14.7574 15 16.1716 15 19 15H19.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" />
+                <path d="M10 5C9.41016 4.39316 7.84027 2 7 2C6.15973 2 4.58984 4.39316 4 5M7 3L7 10" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" />
+              </svg>
+            </button>
+          </div>
+          <section id="pdf-pane" class="pdf-pane">
+            <div id="pdf-viewer-container" class="pdf-viewer-container">
+              <div id="pdf-stage" class="pdf-stage is-empty">
+                <canvas id="pdf-canvas" class="hidden"></canvas>
+              </div>
+              <div id="pdf-status-hint" class="pdf-status-hint hidden" aria-live="polite">
+                <span class="status-hint-spinner" aria-hidden="true"></span>
+                <span id="pdf-status-hint-text">正在载入 PDF 预览...</span>
+              </div>
+              <div id="pdf-placeholder" class="pdf-placeholder">
+                <span class="placeholder-icon">📄</span>
+                <span class="placeholder-title">拖拽 PDF 文件到此处</span>
+                <button id="upload-pdf-btn" class="pixel-btn" type="button">选择 PDF</button>
+              </div>
+            </div>
+            <div id="pdf-footer-nav" class="pdf-footer-nav" style="display: none;">
+              <div class="page-nav">
+                <button id="prev-page-btn" class="btn-nav" type="button" title="上一页">◀</button>
+                <select id="page-select"></select>
+                <button id="next-page-btn" class="btn-nav" type="button" title="下一页">▶</button>
+              </div>
+            </div>
+            <input id="pdf-file-input" type="file" accept="application/pdf" class="sr-only" />
+          </section>
+        </div>
+
+        <div
+          id="workspace-divider"
+          class="workspace-divider"
+          role="separator"
+          tabindex="0"
+          aria-label="调整 PDF 预览与编辑区宽度"
+          aria-orientation="vertical"
+        ></div>
+
+        <div class="workspace-col workspace-col-right panel pixel-border">
+          <div class="editor-status-bar">
+            <div class="editor-status-left">
+              <div id="control-job-stats-wrap" class="control-job-stats-wrap hidden" aria-hidden="true">
+                <div class="control-job-stats" aria-label="任务页统计">
+                  <div class="control-job-stats-row"><span>总页数</span><span id="control-stat-total">0</span></div>
+                  <div class="control-job-stats-row"><span>成功</span><span id="control-stat-ok">0</span></div>
+                  <div class="control-job-stats-row"><span>失败</span><span id="control-stat-fail">0</span></div>
+                </div>
+              </div>
+              <div id="control-extraction-dots" class="control-extraction-dots-row" aria-live="polite">
+                <span class="dots" aria-hidden="true"></span>
+                <span>合并处理中</span>
+              </div>
+              <div id="status-badge" class="status-chip status-idle">
+                <span class="status-dot"></span>
+                <span id="status-text">空闲</span>
+              </div>
+              <div id="progress-wrapper" class="progress-inline" style="display:none">
+                <div class="progress-track-inline">
+                  <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <span id="progress-label" class="progress-label-inline">0/0</span>
+              </div>
+            </div>
+            <div class="editor-status-actions">
+              <button id="single-page-test-btn" class="pixel-btn-sm" type="button" disabled>单页测试</button>
+              <button id="start-extraction-btn" class="pixel-btn-sm" type="button" disabled>开始提取</button>
+              <div id="build-output-menu-wrap" class="build-output-menu" style="display:none">
+                <button id="build-output-btn" class="pixel-btn-sm" type="button">合并</button>
+                <div id="build-output-menu" class="build-output-menu-panel hidden">
+                  <button class="build-output-menu-option" type="button" data-merge-mode="direct">直接拼接</button>
+                  <button class="build-output-menu-option" type="button" data-merge-mode="separator">添加分页符</button>
+                  <button class="build-output-menu-option" type="button" data-merge-mode="separator_with_page_number">添加分页符和页码</button>
+                </div>
+              </div>
+              <span id="extraction-phase-actions" class="editor-status-phase-actions">
+                <button id="retry-page-btn" class="pixel-btn-sm" type="button">重新提取单页</button>
+                <button id="refresh-job-btn" class="pixel-btn-sm" type="button">刷新</button>
+              </span>
+              <span id="merged-output-actions" class="editor-status-phase-actions hidden" aria-hidden="true">
+                <a id="output-download-link" class="pixel-btn-sm" href="#" target="_blank" rel="noopener noreferrer">下载 .md</a>
+                <button id="discard-output-btn" class="pixel-btn-sm" type="button">回退</button>
+              </span>
+            </div>
+          </div>
+          <section class="editor-pane">
+            <div id="page-editor-section" class="editor-section">
+              <div id="page-status-indicator" class="page-status-bar page-status-inline status-pending hidden">
+                <span id="page-status-text">…</span>
+              </div>
+              <div id="page-error" class="page-error-msg"></div>
+              <textarea id="page-editor" class="editor-textarea" placeholder="提取内容将在此显示..."></textarea>
+            </div>
+
+            <div id="output-editor-section" class="editor-section hidden">
+              <textarea id="output-editor" class="editor-textarea" placeholder="构建完成后的 Markdown 文档将在此显示..."></textarea>
+            </div>
+          </section>
+        </div>
+      </div>
+      </div>
+
+      <!-- ── Events Log ─────────────────────── -->
+      <section class="panel pixel-border events-section">
+        <button
+          id="toggle-events-btn"
+          class="pane-header events-pane-head"
+          type="button"
+          aria-expanded="false"
+          aria-controls="events-log"
+        >
+          <h2>事件日志</h2>
+          <span class="events-pane-chevron" aria-hidden="true"><span class="toggle-arrow">▼</span></span>
+        </button>
+        <pre id="events-log" class="events-log collapsed" hidden></pre>
+      </section>
+    </div>
+
+    <script>
+      (function () {
+        /* ── PDF.js Setup ─────────────────────── */
+        var pdfDoc = null;
+        var pdfCurrentUrl = null;
+        var pdfPageRendering = false;
+        var pdfPagePending = null;
+        var pdfResizeTimer = null;
+
+        var WORKSPACE_DIVIDER_WIDTH = 14;
+        var WORKSPACE_SPLIT_STORAGE_KEY = "pdf_kb_workspace_split_ratio_v1";
+        var WORKSPACE_MIN_LEFT_PANE_WIDTH = 320;
+        /** 须与 `.workspace { --workspace-min-right-pane }` 数值一致（px）。 */
+        var WORKSPACE_MIN_RIGHT_PANE_WIDTH = 600;
+        var workspaceSplitRatio = 0.5;
+        var workspaceDividerPointerId = null;
+        var workspaceResizeActive = false;
+        var workspaceResizeSession = null;
+        var workspaceResizePendingClientX = null;
+        var workspaceResizeFrameId = null;
+
+        if (typeof pdfjsLib !== "undefined") {
+          pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        }
+
+        async function loadPdfDocument(url) {
+          if (typeof pdfjsLib === "undefined") return;
+          if (pdfDoc && pdfCurrentUrl === url) {
+            return;
+          }
+          if (pdfDoc) {
+            await pdfDoc.destroy();
+            pdfDoc = null;
+            pdfCurrentUrl = null;
+            renderPdfPage._surfaceCache = Object.create(null);
+            renderPdfPage._cacheOrder = [];
+            renderPdfPage._activeCacheKey = null;
+          }
+          els.pdfCanvas.classList.add("hidden");
+          if (state.localPreviewUrl && url !== state.localPreviewUrl) {
+            revokeLocalPreviewUrl();
+          }
+          try {
+            var loadingTask = pdfjsLib.getDocument(url);
+            pdfDoc = await loadingTask.promise;
+            pdfCurrentUrl = url;
+            els.pdfPlaceholder.classList.add("hidden");
+            await renderPdfPage(state.currentPageNum);
+            updatePageSelect();
+          } catch (err) {
+            log("pdf-load-error", { message: String(err) });
+          }
+        }
+
+        async function renderPdfPage(pageNum) {
+          if (!pdfDoc) return;
+          if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
+          var containerWidth = els.pdfStage.clientWidth - 56;
+          if (containerWidth < 100) containerWidth = 500;
+          var outputScale = Math.min(window.devicePixelRatio || 1, 2);
+          var cacheKey = String(pageNum) + "|" + Math.round(containerWidth) + "|" + outputScale;
+          renderPdfPage._desiredPageNum = pageNum;
+          renderPdfPage._desiredCacheKey = cacheKey;
+          if (!renderPdfPage._surfaceCache) {
+            renderPdfPage._surfaceCache = Object.create(null);
+          }
+          if (!renderPdfPage._cacheOrder) {
+            renderPdfPage._cacheOrder = [];
+          }
+          var surfaceCache = renderPdfPage._surfaceCache;
+          var cacheOrder = renderPdfPage._cacheOrder;
+          var MAX_PDF_SURFACE_CACHE = 6;
+          function touchCacheEntry(key) {
+            var idx = cacheOrder.indexOf(key);
+            if (idx >= 0) {
+              cacheOrder.splice(idx, 1);
+            }
+            cacheOrder.push(key);
+          }
+          function drawSurfaceToViewport(surface) {
+            if (!surface) return;
+            if (surface === els.pdfCanvas) {
+              els.pdfCanvas.classList.remove("hidden");
+              els.pdfStage.classList.remove("is-empty");
+              return;
+            }
+            els.pdfCanvas.width = surface.width;
+            els.pdfCanvas.height = surface.height;
+            els.pdfCanvas.style.width = surface.style.width;
+            els.pdfCanvas.style.height = surface.style.height;
+            var visibleCtx = els.pdfCanvas.getContext("2d");
+            visibleCtx.drawImage(surface, 0, 0);
+            els.pdfCanvas.classList.remove("hidden");
+            els.pdfStage.classList.remove("is-empty");
+          }
+          if (surfaceCache[cacheKey]) {
+            var cachedSurface = surfaceCache[cacheKey];
+            if (pdfPageRendering) {
+              var isSameActiveRequest = (
+                renderPdfPage._activePageNum === pageNum
+                && renderPdfPage._activeCacheKey === cacheKey
+              );
+              if (!isSameActiveRequest) {
+                pdfPagePending = null;
+                var runningRenderTask = renderPdfPage._activeRenderTask;
+                if (runningRenderTask && typeof runningRenderTask.cancel === "function") {
+                  try {
+                    runningRenderTask.cancel();
+                  } catch (_error) {}
+                }
+              }
+            }
+            drawSurfaceToViewport(cachedSurface);
+            touchCacheEntry(cacheKey);
+            return;
+          }
+          if (pdfPageRendering) {
+            var isSamePageRequest = renderPdfPage._activePageNum === pageNum;
+            var isSameRenderKey = renderPdfPage._activeCacheKey === cacheKey;
+            if (isSamePageRequest && isSameRenderKey) {
+              return;
+            }
+            pdfPagePending = pageNum;
+            var activeRenderTask = renderPdfPage._activeRenderTask;
+            if (activeRenderTask && typeof activeRenderTask.cancel === "function") {
+              try {
+                activeRenderTask.cancel();
+              } catch (_error) {}
+            }
+            return;
+          }
+          pdfPageRendering = true;
+          renderPdfPage._activePageNum = pageNum;
+          renderPdfPage._activeCacheKey = cacheKey;
+          try {
+            var page = await pdfDoc.getPage(pageNum);
+            var unscaled = page.getViewport({ scale: 1 });
+            var scale = containerWidth / unscaled.width;
+            var viewport = page.getViewport({ scale: scale });
+            var surfaceWidth = Math.floor(viewport.width * outputScale);
+            var surfaceHeight = Math.floor(viewport.height * outputScale);
+            var surfaceStyleWidth = Math.floor(viewport.width) + "px";
+            var surfaceStyleHeight = Math.floor(viewport.height) + "px";
+            var renderCanvas = null;
+            var ctx = null;
+
+            if (typeof document !== "undefined" && document.createElement) {
+              renderCanvas = document.createElement("canvas");
+              if (renderCanvas && renderCanvas.getContext) {
+                renderCanvas.width = surfaceWidth;
+                renderCanvas.height = surfaceHeight;
+                renderCanvas.style.width = surfaceStyleWidth;
+                renderCanvas.style.height = surfaceStyleHeight;
+                ctx = renderCanvas.getContext("2d");
+              }
+            }
+
+            if (!ctx) {
+              renderCanvas = els.pdfCanvas;
+              renderCanvas.width = surfaceWidth;
+              renderCanvas.height = surfaceHeight;
+              renderCanvas.style.width = surfaceStyleWidth;
+              renderCanvas.style.height = surfaceStyleHeight;
+              ctx = renderCanvas.getContext("2d");
+            }
+
+            ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+            var renderTask = page.render({ canvasContext: ctx, viewport: viewport });
+            renderPdfPage._activeRenderTask = renderTask;
+            await renderTask.promise;
+
+            if (renderCanvas) {
+              surfaceCache[cacheKey] = renderCanvas;
+              touchCacheEntry(cacheKey);
+              while (cacheOrder.length > MAX_PDF_SURFACE_CACHE) {
+                var droppedKey = cacheOrder.shift();
+                delete surfaceCache[droppedKey];
+              }
+            }
+            var shouldDisplayRenderedSurface = (
+              renderPdfPage._desiredPageNum === pageNum
+              && renderPdfPage._desiredCacheKey === cacheKey
+            );
+            if (shouldDisplayRenderedSurface) {
+              drawSurfaceToViewport(renderCanvas);
+            }
+          } catch (err) {
+            var isRenderCancelled = !!err && (
+              err.name === "RenderingCancelledException"
+              || err.name === "AbortException"
+            );
+            if (!isRenderCancelled) {
+              log("pdf-render-error", { page: pageNum, message: String(err) });
+            }
+          } finally {
+            renderPdfPage._activeRenderTask = null;
+            renderPdfPage._activePageNum = null;
+            renderPdfPage._activeCacheKey = null;
+            pdfPageRendering = false;
+          }
+          if (pdfPagePending !== null) {
+            var next = pdfPagePending;
+            pdfPagePending = null;
+            await renderPdfPage(next);
+          }
+        }
+
+        /* ── Application State ────────────────── */
+        var state = {
+          jobId: null,
+          job: null,
+          historyJobs: [],
+          pages: [],
+          currentPageNum: 1,
+          currentPage: null,
+          output: null,
+          stream: null,
+          isBusy: false,
+          pendingUpload: false,
+          previewLoading: false,
+          previewReady: false,
+          preparedFile: null,
+          localPreviewUrl: null,
+          singlePageTest: { status: "idle", pageNum: null, content: null, error: null },
+          pageListSummaryByNum: Object.create(null),
+        };
+        var pageIndexByNum = Object.create(null);
+        var pageOptionByNum = Object.create(null);
+        var historyItemByJobId = Object.create(null);
+        var jobDonePageSet = new Set();
+        var jobFailedPageSet = new Set();
+        var pendingUiFlush = null;
+        var pendingUiFrameId = null;
+        var historyPanelExpanded = false;
+        var configPanelExpanded = false;
+        var historyDirty = false;
+        var historyJobsLoaded = false;
+        var MAX_EVENTS_LOG_LINES = 400;
+        var eventsLogLines = [];
+        var eventsLogDirty = false;
+        var eventsLogFrameId = null;
+        var eventsLogExpanded = false;
+        var eventsLogRenderedCount = 0;
+        var eventsLogNeedsFullRender = false;
+
+        /* ── DOM References ───────────────────── */
+        var els = {
+          appRoot: document.getElementById("app-root"),
+          workspace: document.getElementById("workspace"),
+          workspaceDivider: document.getElementById("workspace-divider"),
+          controlStatTotal: document.getElementById("control-stat-total"),
+          controlStatOk: document.getElementById("control-stat-ok"),
+          controlStatFail: document.getElementById("control-stat-fail"),
+          controlJobStatsWrap: document.getElementById("control-job-stats-wrap"),
+          controlExtractionDots: document.getElementById("control-extraction-dots"),
+          headerTaskTitle: document.getElementById("header-task-title"),
+          headerTaskStatusSymbol: document.getElementById("header-task-status-symbol"),
+          headerPageIndicator: document.getElementById("header-page-indicator"),
+          headerBackHomeBtn: document.getElementById("header-back-home-btn"),
+          configForm: document.getElementById("config-form"),
+          modelName: document.getElementById("cfg-model-name"),
+          timeout: document.getElementById("cfg-timeout"),
+          dpi: document.getElementById("cfg-dpi"),
+          concurrency: document.getElementById("cfg-concurrency"),
+          maxRetries: document.getElementById("cfg-max-retries"),
+          prompt: document.getElementById("cfg-prompt"),
+          apiKey: document.getElementById("cfg-api-key"),
+          configHasKey: document.getElementById("config-has-key"),
+          configTestBtn: document.getElementById("test-config-btn"),
+          configTestStatus: document.getElementById("config-test-status"),
+          loadConfigBtn: document.getElementById("load-config-btn"),
+          restoreInitialConfigBtn: document.getElementById("restore-initial-config-btn"),
+          saveConfigBtn: document.getElementById("save-config-btn"),
+
+          pdfDropZone: document.getElementById("workspace-col-left"),
+          pdfViewerContainer: document.getElementById("pdf-viewer-container"),
+          pdfStage: document.getElementById("pdf-stage"),
+          pdfFileInput: document.getElementById("pdf-file-input"),
+          uploadPdfBtn: document.getElementById("upload-pdf-btn"),
+          uploadPdfHeaderBtn: document.getElementById("upload-pdf-header-btn"),
+          pdfFooterNav: document.getElementById("pdf-footer-nav"),
+          pdfStatusHint: document.getElementById("pdf-status-hint"),
+          pdfStatusHintText: document.getElementById("pdf-status-hint-text"),
+
+          refreshJobBtn: document.getElementById("refresh-job-btn"),
+          outputBuildMenuWrap: document.getElementById("build-output-menu-wrap"),
+          buildOutputBtn: document.getElementById("build-output-btn"),
+          outputBuildMenu: document.getElementById("build-output-menu"),
+          startExtractionBtn: document.getElementById("start-extraction-btn"),
+          singlePageTestBtn: document.getElementById("single-page-test-btn"),
+          statusBadge: document.getElementById("status-badge"),
+          statusText: document.getElementById("status-text"),
+
+          progressWrapper: document.getElementById("progress-wrapper"),
+          progressFill: document.getElementById("progress-fill"),
+          progressLabel: document.getElementById("progress-label"),
+
+          pageSelect: document.getElementById("page-select"),
+          prevPageBtn: document.getElementById("prev-page-btn"),
+          nextPageBtn: document.getElementById("next-page-btn"),
+          pageEditor: document.getElementById("page-editor"),
+          pageError: document.getElementById("page-error"),
+          pageStatusIndicator: document.getElementById("page-status-indicator"),
+          pageStatusText: document.getElementById("page-status-text"),
+          retryPageBtn: document.getElementById("retry-page-btn"),
+          extractionPhaseActions: document.getElementById("extraction-phase-actions"),
+          mergedOutputActions: document.getElementById("merged-output-actions"),
+
+          pageEditorSection: document.getElementById("page-editor-section"),
+          outputEditorSection: document.getElementById("output-editor-section"),
+
+          outputEditor: document.getElementById("output-editor"),
+          discardOutputBtn: document.getElementById("discard-output-btn"),
+          outputDownloadLink: document.getElementById("output-download-link"),
+
+          eventsLog: document.getElementById("events-log"),
+          toggleHistoryBtn: document.getElementById("toggle-history-btn"),
+          historyPanel: document.getElementById("history-panel"),
+          historyCount: document.getElementById("history-count"),
+          historyEmpty: document.getElementById("history-empty"),
+          historyList: document.getElementById("history-list"),
+          toggleConfigBtn: document.getElementById("toggle-config-btn"),
+          configPanel: document.querySelector(".config-panel"),
+
+          toggleEventsBtn: document.getElementById("toggle-events-btn"),
+
+          pdfCanvas: document.getElementById("pdf-canvas"),
+          pdfPlaceholder: document.getElementById("pdf-placeholder"),
+        };
+        historyPanelExpanded = !els.historyPanel.classList.contains("collapsed");
+        configPanelExpanded = !!(els.configPanel && !els.configPanel.classList.contains("collapsed"));
+        eventsLogExpanded = !els.eventsLog.hidden && !els.eventsLog.classList.contains("collapsed");
+        setHistoryPanelExpanded(historyPanelExpanded);
+        setConfigPanelExpanded(configPanelExpanded);
+        setEventsLogExpanded(eventsLogExpanded);
+
+        function schedulePdfRender() {
+          if (!pdfDoc) return;
+          window.clearTimeout(pdfResizeTimer);
+          pdfResizeTimer = window.setTimeout(function () {
+            runAction(function () { return renderPdfPage(state.currentPageNum); });
+          }, 120);
+        }
+
+        function loadPersistedWorkspaceSplitRatio() {
+          try {
+            if (!window.localStorage) return;
+            var raw = localStorage.getItem(WORKSPACE_SPLIT_STORAGE_KEY);
+            if (raw === null || raw === "") return;
+            var parsed = Number(raw);
+            if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 1) return;
+            workspaceSplitRatio = parsed;
+          } catch (_e) {}
+        }
+
+        function persistWorkspaceSplitRatio() {
+          try {
+            if (!window.localStorage) return;
+            var avail = getWorkspaceAvailableWidth();
+            if (avail <= 0) return;
+            var clamped = clampWorkspaceSplitRatio(workspaceSplitRatio, avail);
+            workspaceSplitRatio = clamped;
+            localStorage.setItem(WORKSPACE_SPLIT_STORAGE_KEY, String(clamped));
+          } catch (_e) {}
+        }
+
+        function getWorkspaceAvailableWidth() {
+          if (!els.workspace) return 0;
+          return Math.max(0, els.workspace.clientWidth - WORKSPACE_DIVIDER_WIDTH);
+        }
+
+        function clampWorkspaceSplitRatio(ratio, availableWidth) {
+          if (typeof availableWidth !== "number" || Number.isNaN(availableWidth)) {
+            availableWidth = getWorkspaceAvailableWidth();
+          }
+          if (!availableWidth) return 0.5;
+          var minRatio = WORKSPACE_MIN_LEFT_PANE_WIDTH / availableWidth;
+          var maxRatio = 1 - WORKSPACE_MIN_RIGHT_PANE_WIDTH / availableWidth;
+          /* 相等时恰好为唯一合法比例（如 avail=920 → 320/920）；不可用 0.5，否则 resize 会把 localStorage 写坏 */
+          if (minRatio >= maxRatio) return minRatio;
+          if (typeof ratio !== "number" || Number.isNaN(ratio)) return 0.5;
+          return Math.min(Math.max(ratio, minRatio), maxRatio);
+        }
+
+        function updateWorkspaceDividerA11y(ratio, availableWidth) {
+          if (!els.workspaceDivider) return;
+          els.workspaceDivider.setAttribute("tabindex", "0");
+          els.workspaceDivider.removeAttribute("aria-hidden");
+          els.workspaceDivider.setAttribute("aria-valuemin", "0");
+          els.workspaceDivider.setAttribute("aria-valuemax", "100");
+          els.workspaceDivider.setAttribute(
+            "aria-valuenow",
+            String(
+              Math.round(
+                clampWorkspaceSplitRatio(
+                  typeof ratio === "number" ? ratio : workspaceSplitRatio,
+                  availableWidth
+                ) * 100
+              )
+            )
+          );
+        }
+
+        function applyWorkspaceSplitWithAvailableWidth(availableWidth) {
+          if (!els.workspace) return;
+          if (availableWidth <= 0) return;
+          workspaceSplitRatio = clampWorkspaceSplitRatio(workspaceSplitRatio, availableWidth);
+          els.workspace.style.setProperty(
+            "--workspace-left-width",
+            Math.round(availableWidth * workspaceSplitRatio) + "px"
+          );
+          updateWorkspaceDividerA11y(workspaceSplitRatio, availableWidth);
+        }
+
+        function applyWorkspaceSplit() {
+          if (!els.workspace) return;
+          applyWorkspaceSplitWithAvailableWidth(getWorkspaceAvailableWidth());
+        }
+
+        function createWorkspaceResizeSession() {
+          if (!els.workspace) return null;
+          var bounds = els.workspace.getBoundingClientRect();
+          var availableWidth = Math.max(0, bounds.width - WORKSPACE_DIVIDER_WIDTH);
+          if (!availableWidth) return null;
+          return {
+            left: bounds.left,
+            width: bounds.width,
+            availableWidth: availableWidth,
+          };
+        }
+
+        function applyWorkspaceResizeAtClientX(clientX) {
+          if (!workspaceResizeSession) return;
+          var leftWidth = clientX - workspaceResizeSession.left - (WORKSPACE_DIVIDER_WIDTH / 2);
+          workspaceSplitRatio = clampWorkspaceSplitRatio(
+            leftWidth / workspaceResizeSession.availableWidth,
+            workspaceResizeSession.availableWidth
+          );
+          applyWorkspaceSplitWithAvailableWidth(workspaceResizeSession.availableWidth);
+        }
+
+        function flushWorkspaceResizeFrame() {
+          workspaceResizeFrameId = null;
+          if (workspaceResizePendingClientX === null) return;
+          var clientX = workspaceResizePendingClientX;
+          workspaceResizePendingClientX = null;
+          applyWorkspaceResizeAtClientX(clientX);
+        }
+
+        function updateWorkspaceSplitFromClientX(clientX) {
+          if (!workspaceResizeActive || !els.workspace) return;
+          if (!workspaceResizeSession) {
+            workspaceResizeSession = createWorkspaceResizeSession();
+          }
+          if (!workspaceResizeSession) return;
+          workspaceResizePendingClientX = clientX;
+          if (workspaceResizeFrameId !== null) return;
+          workspaceResizeFrameId = window.requestAnimationFrame(flushWorkspaceResizeFrame);
+        }
+
+        function flushPendingWorkspaceResize() {
+          if (workspaceResizeFrameId !== null && window.cancelAnimationFrame) {
+            window.cancelAnimationFrame(workspaceResizeFrameId);
+            workspaceResizeFrameId = null;
+          }
+          if (workspaceResizePendingClientX === null) return;
+          var clientX = workspaceResizePendingClientX;
+          workspaceResizePendingClientX = null;
+          applyWorkspaceResizeAtClientX(clientX);
+        }
+
+        function stopWorkspaceResize() {
+          if (!workspaceResizeActive) return;
+          flushPendingWorkspaceResize();
+          workspaceResizeActive = false;
+          workspaceResizeSession = null;
+          document.body.classList.remove("workspace-resizing");
+          if (
+            workspaceDividerPointerId !== null &&
+            els.workspaceDivider &&
+            els.workspaceDivider.releasePointerCapture &&
+            els.workspaceDivider.hasPointerCapture &&
+            els.workspaceDivider.hasPointerCapture(workspaceDividerPointerId)
+          ) {
+            els.workspaceDivider.releasePointerCapture(workspaceDividerPointerId);
+          }
+          workspaceDividerPointerId = null;
+          persistWorkspaceSplitRatio();
+          schedulePdfRender();
+        }
+
+        function nudgeWorkspaceSplit(stepDirection) {
+          var availableWidth = getWorkspaceAvailableWidth();
+          if (availableWidth <= 0) return;
+          workspaceSplitRatio = clampWorkspaceSplitRatio(workspaceSplitRatio + ((stepDirection * 28) / availableWidth));
+          applyWorkspaceSplit();
+          persistWorkspaceSplitRatio();
+          schedulePdfRender();
+        }
+
+        function getHeaderTaskTitle() {
+          if (state.job && state.job.pdf_name) return String(state.job.pdf_name);
+          if (state.jobId && Array.isArray(state.historyJobs)) {
+            for (var hi = 0; hi < state.historyJobs.length; hi++) {
+              var hj = state.historyJobs[hi];
+              if (hj && hj.job_id === state.jobId && hj.pdf_name) return String(hj.pdf_name);
+            }
+          }
+          return state.jobId ? "任务" : "";
+        }
+
+        function jobStatusSymbolHtml(status) {
+          if (status === "failed") return "✕";
+          if (status === "building") return '<span class="dots" aria-hidden="true"></span>';
+          if (status === "extracting" || status === "idle" || status === "uploading" || status === "previewing") {
+            return '<span class="blink">…</span>';
+          }
+          return "◆";
+        }
+
+        function updateWorkspaceHeaderChrome() {
+          if (!els.headerTaskTitle || !els.headerTaskStatusSymbol || !els.headerPageIndicator) return;
+          if (!state.jobId) {
+            els.headerTaskTitle.textContent = "";
+            els.headerTaskStatusSymbol.innerHTML = "";
+            els.headerPageIndicator.textContent = "";
+            return;
+          }
+          els.headerTaskTitle.textContent = getHeaderTaskTitle();
+          var st = state.job ? state.job.status : "idle";
+          els.headerTaskStatusSymbol.innerHTML = jobStatusSymbolHtml(st);
+          var total = getPageNavigationTotal();
+          if (total <= 0) {
+            els.headerPageIndicator.textContent = "";
+            return;
+          }
+          var cur = normalizePageNum(state.currentPageNum);
+          var c = cur !== null ? cur : 1;
+          els.headerPageIndicator.textContent = "页 " + c + " / " + total;
+        }
+
+        function escapeHtml(s) {
+          return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;");
+        }
+
+        function firstLineSnippet(text) {
+          if (typeof text !== "string") return "";
+          var lines = text.split(/\r?\n/);
+          for (var li = 0; li < lines.length; li++) {
+            var t = lines[li].trim();
+            if (t.length > 0) {
+              if (t.length > 40) return t.slice(0, 37) + "…";
+              return t;
+            }
+          }
+          return "";
+        }
+
+        function rememberPageLineFromContent(pageNum, content) {
+          var n = normalizePageNum(pageNum);
+          if (n === null) return;
+          var snip = firstLineSnippet(content || "");
+          if (snip) state.pageListSummaryByNum[n] = snip;
+        }
+
+        async function fetchPageSummarySnippet(pageNum) {
+          if (!state.jobId) return;
+          var snapshotJobId = state.jobId;
+          var n = normalizePageNum(pageNum);
+          if (n === null) return;
+          try {
+            var page = await requestJson(
+              "/api/jobs/" + encodeURIComponent(snapshotJobId) + "/pages/" + n
+            );
+            if (state.jobId !== snapshotJobId) return;
+            var blob = "";
+            if (page && typeof page.content === "string" && page.content.length) {
+              blob = page.content;
+            } else if (page && typeof page.error === "string" && page.error.length) {
+              blob = page.error;
+            }
+            rememberPageLineFromContent(n, blob);
+          } catch (err) {
+            log("page-summary-hydrate-failed", { page_num: n, message: String(err) });
+          }
+        }
+
+        async function hydratePageListSummaries() {
+          if (!state.jobId || !Array.isArray(state.pages)) return;
+          var snapshotJobId = state.jobId;
+          for (var i = 0; i < state.pages.length; i++) {
+            if (state.jobId !== snapshotJobId) return;
+            var p = state.pages[i];
+            if (p.status !== "done" && p.status !== "failed") continue;
+            if (state.pageListSummaryByNum[p.page_num]) continue;
+            await fetchPageSummarySnippet(p.page_num);
+          }
+        }
+
+        async function goBackHomeFromHeader() {
+          if (state.isBusy) {
+            window.alert("当前操作进行中，请稍后再返回首页。");
+            return;
+          }
+          if (state.pendingUpload || state.previewLoading) {
+            window.alert("正在处理 PDF，请稍后再返回首页。");
+            return;
+          }
+          await resetActiveWorkspace();
+        }
+
+        /* ── Status Label Map ─────────────────── */
+        var STATUS_LABELS = {
+          idle: "空闲",
+          extracting: "提取中",
+          extracted: "提取完成",
+          building: "构建中",
+          uploading: "上传中",
+          previewing: "预览加载中",
+          prepared: "待开始",
+          ready: "就绪",
+          failed: "失败",
+        };
+
+        /* ── Logging ──────────────────────────── */
+        function isEventsLogNearBottom() {
+          if (!els.eventsLog) return true;
+          return (els.eventsLog.scrollTop + els.eventsLog.clientHeight + 24) >= els.eventsLog.scrollHeight;
+        }
+
+        function renderEventsLog() {
+          if (!els.eventsLog || !eventsLogDirty) return;
+          var shouldStickBottom = isEventsLogNearBottom();
+          if (eventsLogNeedsFullRender || eventsLogRenderedCount > eventsLogLines.length) {
+            rewriteEventsLogFromBuffer();
+          } else if (eventsLogRenderedCount < eventsLogLines.length) {
+            appendEventsLogTail(eventsLogRenderedCount);
+          }
+          eventsLogDirty = false;
+          if (shouldStickBottom) {
+            els.eventsLog.scrollTop = els.eventsLog.scrollHeight;
+          }
+        }
+
+        function rewriteEventsLogFromBuffer() {
+          var rendered = eventsLogLines.join("\n");
+          if (rendered) {
+            rendered += "\n";
+          }
+          els.eventsLog.textContent = rendered;
+          eventsLogRenderedCount = eventsLogLines.length;
+          eventsLogNeedsFullRender = false;
+        }
+
+        function appendEventsLogTail(fromIndex) {
+          if (fromIndex >= eventsLogLines.length) return;
+          var appended = eventsLogLines.slice(fromIndex).join("\n");
+          if (!appended) return;
+          appended += "\n";
+          if (typeof els.eventsLog.insertAdjacentText === "function") {
+            els.eventsLog.insertAdjacentText("beforeend", appended);
+          } else {
+            var existingText = typeof els.eventsLog.textContent === "string" ? els.eventsLog.textContent : "";
+            els.eventsLog.textContent = existingText + appended;
+          }
+          eventsLogRenderedCount = eventsLogLines.length;
+        }
+
+        function flushEventsLog() {
+          eventsLogFrameId = null;
+          if (!eventsLogExpanded) return;
+          renderEventsLog();
+        }
+
+        function scheduleEventsLogFlush(forceImmediate) {
+          if (!eventsLogExpanded && !forceImmediate) return;
+          if (!eventsLogDirty && !forceImmediate) return;
+          if (eventsLogFrameId !== null) return;
+          if (forceImmediate || !window.requestAnimationFrame) {
+            flushEventsLog();
+            return;
+          }
+          eventsLogFrameId = window.requestAnimationFrame(function () {
+            flushEventsLog();
+          });
+        }
+
+        function setEventsLogExpanded(expanded) {
+          eventsLogExpanded = !!expanded;
+          syncPanelCollapsedState(els.eventsLog, !eventsLogExpanded);
+          els.eventsLog.classList.toggle("expanded", eventsLogExpanded);
+          els.toggleEventsBtn.classList.toggle("expanded", eventsLogExpanded);
+          if (els.toggleEventsBtn) {
+            els.toggleEventsBtn.setAttribute("aria-expanded", eventsLogExpanded ? "true" : "false");
+          }
+          if (!eventsLogExpanded) {
+            if (eventsLogFrameId !== null && window.cancelAnimationFrame) {
+              window.cancelAnimationFrame(eventsLogFrameId);
+            }
+            eventsLogFrameId = null;
+            return;
+          }
+          scheduleEventsLogFlush(false);
+        }
+
+        function log(message, payload) {
+          var line = payload === undefined ? message : message + " " + JSON.stringify(payload);
+          var now = new Date().toISOString();
+          eventsLogLines.push("[" + now + "] " + line);
+          if (eventsLogLines.length > MAX_EVENTS_LOG_LINES) {
+            var overflow = eventsLogLines.length - MAX_EVENTS_LOG_LINES;
+            eventsLogLines.splice(0, overflow);
+            eventsLogRenderedCount = Math.max(eventsLogRenderedCount - overflow, 0);
+            eventsLogNeedsFullRender = true;
+          }
+          eventsLogDirty = true;
+          scheduleEventsLogFlush(false);
+        }
+
+        function normalizeBuildMergeMode(value) {
+          if (value === "separator" || value === "separator_with_page_number") {
+            return value;
+          }
+          return "direct";
+        }
+
+        function closeBuildOutputMenu() {
+          els.outputBuildMenu.classList.add("hidden");
+        }
+
+        /* ── API helpers ──────────────────────── */
+        function apiErrorText(responseBody, fallback) {
+          if (responseBody && responseBody.detail && responseBody.detail.code) {
+            return responseBody.detail.code + ": " + responseBody.detail.message;
+          }
+          return fallback;
+        }
+
+        async function requestJson(path, init) {
+          var response = await fetch(path, init);
+          var text = await response.text();
+          var payload = text ? JSON.parse(text) : null;
+          if (!response.ok) {
+            var error = new Error(apiErrorText(payload, "HTTP " + response.status));
+            if (payload && payload.detail) {
+              error.appError = {
+                code: typeof payload.detail.code === "string" ? payload.detail.code : "",
+                message: typeof payload.detail.message === "string" ? payload.detail.message : "",
+                details: payload.detail.details || null,
+              };
+            }
+            error.status = response.status;
+            throw error;
+          }
+          return payload;
+        }
+
+        /* ── Stream ───────────────────────────── */
+        function closeStream() {
+          if (!state.stream) return;
+          state.stream.close();
+          state.stream = null;
+        }
+
+        function revokeLocalPreviewUrl() {
+          if (!state.localPreviewUrl) return;
+          URL.revokeObjectURL(state.localPreviewUrl);
+          state.localPreviewUrl = null;
+        }
+
+        function showPdfStatusHint(message, layoutMode) {
+          els.pdfStatusHintText.textContent = message;
+          els.pdfStatusHint.classList.remove("hidden");
+          els.pdfStatusHintText.classList.add("blink");
+          var mode = layoutMode || "toast";
+          var empty = els.pdfStage.classList.contains("is-empty");
+          if (mode === "empty-overlay" && empty) {
+            els.pdfPlaceholder.classList.add("hidden");
+            els.pdfViewerContainer.classList.add("pdf-status-active");
+          } else {
+            els.pdfViewerContainer.classList.remove("pdf-status-active");
+            if (mode === "toast" && empty) {
+              els.pdfPlaceholder.classList.remove("hidden");
+            }
+          }
+        }
+
+        function hidePdfStatusHint() {
+          els.pdfStatusHint.classList.add("hidden");
+          els.pdfStatusHintText.classList.remove("blink");
+          els.pdfViewerContainer.classList.remove("pdf-status-active");
+          if (els.pdfStage.classList.contains("is-empty")) {
+            els.pdfPlaceholder.classList.remove("hidden");
+          }
+        }
+
+        function resetEditors() {
+          replacePageSummaries([]);
+          state.currentPage = null;
+          state.currentPageNum = 1;
+          closeBuildOutputMenu();
+          els.pdfCanvas.classList.add("hidden");
+          els.pdfStage.classList.add("is-empty");
+          els.pdfPlaceholder.classList.remove("hidden");
+          els.pageEditor.value = "";
+          els.pageError.textContent = "";
+          clearOutputState();
+          hidePdfStatusHint();
+          resetSinglePageTest();
+          updatePageStatusIndicator();
+          updatePageSelect();
+        }
+
+        function resetSinglePageTest() {
+          state.singlePageTest = { status: "idle", pageNum: null, content: null, error: null };
+        }
+
+        /**
+         * 渲染单页测试 running / done / failed：顶栏 #status-badge / #status-text 展示标题；
+         * 编辑器区不写重复标题 (#page-status-indicator 保持隐藏)。纯视图函数，抽离后可单测。
+         */
+        function renderSinglePageTestView(test) {
+          if (!test || test.status === "idle") return;
+          /* 标题只在顶栏 #status-text 展示，避免正文区 (#page-status-indicator) 重复一行 */
+          if (els.pageStatusIndicator && els.pageStatusIndicator.classList) {
+            els.pageStatusIndicator.classList.add("hidden");
+          }
+          if (els.pageStatusText) els.pageStatusText.textContent = "";
+          var pageNum = Number.isInteger(test.pageNum) && test.pageNum > 0 ? test.pageNum : 1;
+          if (test.status === "running") {
+            els.statusBadge.className = "status-chip status-extracting";
+            els.statusText.textContent = "测试中 · 第 " + pageNum + " 页";
+            if (els.statusText && els.statusText.classList) els.statusText.classList.add("blink");
+            els.pageEditor.value = "";
+            els.pageEditor.readOnly = true;
+            els.pageEditor.disabled = true;
+            els.pageError.textContent = "";
+            return;
+          }
+          if (test.status === "done") {
+            els.statusBadge.className = "status-chip status-done";
+            els.statusText.textContent = "测试结果 · 第 " + pageNum + " 页";
+            if (els.statusText && els.statusText.classList) els.statusText.classList.remove("blink");
+            els.pageEditor.value = typeof test.content === "string" ? test.content : "";
+            els.pageEditor.readOnly = true;
+            els.pageEditor.disabled = true;
+            els.pageError.textContent = "";
+            return;
+          }
+          // failed
+          els.statusBadge.className = "status-chip status-failed";
+          els.statusText.textContent = "测试失败 · 第 " + pageNum + " 页";
+          if (els.statusText && els.statusText.classList) els.statusText.classList.remove("blink");
+          els.pageEditor.value = "";
+          els.pageEditor.readOnly = true;
+          els.pageEditor.disabled = true;
+          var message = (test.error && typeof test.error.message === "string")
+            ? test.error.message
+            : "单页测试失败。";
+          var code = (test.error && typeof test.error.code === "string") ? test.error.code : "";
+          if (code === "LLM_AUTH_FAILED" || code === "CONFIG_MISSING_API_KEY") {
+            message = message + "（请去配置面板配置 API Key）";
+          }
+          els.pageError.textContent = message;
+        }
+
+        function clearOutputState() {
+          state.output = null;
+          els.outputEditor.value = "";
+          els.outputDownloadLink.href = "#";
+          els.outputDownloadLink.classList.add("is-disabled");
+        }
+
+        async function previewLocalPdf(file) {
+          await destroyRenderedPdf();
+          revokeLocalPreviewUrl();
+          state.localPreviewUrl = URL.createObjectURL(file);
+          els.pdfPlaceholder.classList.add("hidden");
+          await loadPdfDocument(state.localPreviewUrl);
+          if (!pdfDoc) {
+            throw new Error("PDF 预览加载失败，请重新选择文件");
+          }
+        }
+
+        function resetPreparedUploadState() {
+          state.previewLoading = false;
+          state.previewReady = false;
+          state.preparedFile = null;
+        }
+
+        function hasLocalPdfPreviewLoaded() {
+          return !!state.localPreviewUrl && !!pdfDoc && pdfCurrentUrl === state.localPreviewUrl;
+        }
+
+        function getWorkspaceStatus() {
+          if (state.pendingUpload) return "uploading";
+          if (state.job) return state.job.status;
+          if (state.previewLoading) return "previewing";
+          if (state.previewReady) return "prepared";
+          return "idle";
+        }
+
+        async function destroyRenderedPdf() {
+          if (pdfDoc) {
+            await pdfDoc.destroy();
+            pdfDoc = null;
+            pdfCurrentUrl = null;
+          }
+          renderPdfPage._surfaceCache = Object.create(null);
+          renderPdfPage._cacheOrder = [];
+          renderPdfPage._activeCacheKey = null;
+        }
+
+        async function resetActiveWorkspace() {
+          cancelPendingPageSave();
+          closeStream();
+          history.replaceState(null, "", "/");
+          state.jobId = null;
+          state.job = null;
+          state.pendingUpload = false;
+          resetPreparedUploadState();
+          resetEditors();
+          revokeLocalPreviewUrl();
+          await destroyRenderedPdf();
+          setHistoryPanelExpanded(true);
+          updateControlAvailability();
+          await syncHistoryPanelOnDemand(true);
+        }
+
+        /* ── UI State Updates ─────────────────── */
+        function updateControlAvailability() {
+          if (els.appRoot) {
+            els.appRoot.classList.toggle("has-job", !!state.jobId);
+          }
+          var status = getWorkspaceStatus();
+          var extractionIncomplete =
+            state.job
+            && Array.isArray(state.job.failed_pages)
+            && state.job.failed_pages.length > 0;
+          var statusBadgeLabel = STATUS_LABELS[status] || status;
+          if (
+            state.job
+            && state.job.status === "extracting"
+            && extractionIncomplete
+            && state.job.processed_count === state.job.total_pages
+          ) {
+            statusBadgeLabel = "提取未完成（含失败页）";
+          }
+          var isReady = status === "ready";
+          var hasPreparedFile = !!state.preparedFile;
+          var isFileOperationPending = state.pendingUpload || state.previewLoading;
+          var singlePageTestStatus = state.singlePageTest && state.singlePageTest.status
+            ? state.singlePageTest.status
+            : "idle";
+          var singlePageTestRunning = singlePageTestStatus === "running";
+          var canWritePages = state.job && state.pages.length > 0 && status !== "building" && status !== "ready" && !state.isBusy;
+          var currentPageNumValue = Number(state.currentPageNum);
+          var currentPageNum = Number.isInteger(currentPageNumValue) && currentPageNumValue > 0
+            ? currentPageNumValue
+            : null;
+          var currentPageStatus = "";
+          if (currentPageNum !== null && Array.isArray(state.pages)) {
+            for (var pageStatusIndex = 0; pageStatusIndex < state.pages.length; pageStatusIndex++) {
+              var pageSummary = state.pages[pageStatusIndex];
+              if (pageSummary && pageSummary.page_num === currentPageNum) {
+                currentPageStatus = pageSummary.status;
+                break;
+              }
+            }
+          }
+          if (!currentPageStatus && state.currentPage && state.currentPage.page_num === currentPageNum) {
+            currentPageStatus = state.currentPage.status;
+          }
+          var canRetryCurrentPage = canWritePages
+            && (status === "extracting" || status === "extracted")
+            && (currentPageStatus === "done" || currentPageStatus === "failed");
+          var canBuild =
+            state.job
+            && status === "extracted"
+            && !extractionIncomplete
+            && !state.isBusy;
+          var canStartExtraction = !state.jobId && !state.job && hasPreparedFile && state.previewReady && !isFileOperationPending && !state.isBusy && !singlePageTestRunning;
+          var canSinglePageTest = !state.jobId && !state.job && hasPreparedFile && state.previewReady && !isFileOperationPending && !state.isBusy && !singlePageTestRunning;
+          var canDiscardOutput = state.job && isReady && !state.isBusy;
+          var canSaveOutput = state.job && isReady && !state.isBusy;
+
+          var isSinglePageTestViewActive = !state.jobId && singlePageTestStatus !== "idle";
+
+          /* Status badge */
+          if (isSinglePageTestViewActive) {
+            /* 单页测试结果占据状态徽标；后续的 page-editor 渲染也改写 */
+            renderSinglePageTestView(state.singlePageTest);
+          } else {
+            els.statusBadge.className = "status-chip status-" + status;
+            els.statusText.textContent = statusBadgeLabel;
+            if (els.statusText && els.statusText.classList) els.statusText.classList.remove("blink");
+            /* 避免单页测试把编辑器永久锁成只读；常规工作区始终由 disabled 控制可写性。 */
+            els.pageEditor.readOnly = false;
+            if (typeof updatePageStatusIndicator === "function") {
+              updatePageStatusIndicator();
+            }
+          }
+          updateProgress();
+
+          /* Workspace mode switching */
+          if (isReady) {
+            els.pageEditorSection.classList.add("hidden");
+            els.outputEditorSection.classList.remove("hidden");
+            if (els.extractionPhaseActions) {
+              els.extractionPhaseActions.classList.add("hidden");
+              els.extractionPhaseActions.setAttribute("aria-hidden", "true");
+            }
+            if (els.mergedOutputActions) {
+              els.mergedOutputActions.classList.remove("hidden");
+              els.mergedOutputActions.setAttribute("aria-hidden", "false");
+            }
+          } else {
+            els.pageEditorSection.classList.remove("hidden");
+            els.outputEditorSection.classList.add("hidden");
+            if (els.extractionPhaseActions) {
+              els.extractionPhaseActions.classList.remove("hidden");
+              els.extractionPhaseActions.setAttribute("aria-hidden", "false");
+            }
+            if (els.mergedOutputActions) {
+              els.mergedOutputActions.classList.add("hidden");
+              els.mergedOutputActions.setAttribute("aria-hidden", "true");
+            }
+          }
+
+          /* Build button: visible when merge is allowed (extracted & no failures), or building */
+          var showBuild =
+            state.job
+            && !extractionIncomplete
+            && (status === "extracted" || status === "building");
+          els.outputBuildMenuWrap.style.display = showBuild ? "" : "none";
+          els.buildOutputBtn.disabled = !canBuild;
+          if (!showBuild || !canBuild) closeBuildOutputMenu();
+
+          /* Button states */
+          els.startExtractionBtn.style.display = state.jobId ? "none" : "";
+          els.startExtractionBtn.disabled = !canStartExtraction;
+          els.singlePageTestBtn.style.display = state.jobId ? "none" : "";
+          els.singlePageTestBtn.disabled = !canSinglePageTest;
+          els.retryPageBtn.disabled = !canRetryCurrentPage;
+          els.discardOutputBtn.disabled = !canDiscardOutput;
+          els.pageEditor.disabled = isSinglePageTestViewActive ? true : !canWritePages;
+          els.outputEditor.disabled = !canSaveOutput;
+          els.uploadPdfBtn.disabled = isFileOperationPending;
+          els.uploadPdfHeaderBtn.disabled = isFileOperationPending;
+          els.pdfFileInput.disabled = isFileOperationPending;
+          els.refreshJobBtn.disabled = !state.jobId || isFileOperationPending;
+          els.loadConfigBtn.disabled = state.isBusy || isFileOperationPending;
+          els.restoreInitialConfigBtn.disabled = state.isBusy || isFileOperationPending;
+          els.saveConfigBtn.disabled = state.isBusy || isFileOperationPending;
+          els.configTestBtn.disabled = state.isBusy || isFileOperationPending;
+
+          var statTotal = state.job ? (state.job.total_pages || 0) : 0;
+          if (els.controlStatTotal) els.controlStatTotal.textContent = String(statTotal);
+          if (els.controlStatOk) els.controlStatOk.textContent = String(jobDonePageSet.size);
+          if (els.controlStatFail) els.controlStatFail.textContent = String(jobFailedPageSet.size);
+          if (els.controlJobStatsWrap) {
+            els.controlJobStatsWrap.classList.add("hidden");
+            els.controlJobStatsWrap.setAttribute("aria-hidden", "true");
+          }
+          if (els.controlExtractionDots) {
+            els.controlExtractionDots.classList.toggle("is-visible", status === "building");
+          }
+
+          var canDownloadOut = state.job && isReady && !state.isBusy;
+          if (els.outputDownloadLink) {
+            els.outputDownloadLink.classList.toggle("is-disabled", !canDownloadOut);
+            if (canDownloadOut && state.jobId) {
+              els.outputDownloadLink.href = "/api/jobs/" + encodeURIComponent(state.jobId) + "/output/download";
+            } else {
+              els.outputDownloadLink.href = "#";
+            }
+          }
+
+          if (typeof updateWorkspaceHeaderChrome === "function") updateWorkspaceHeaderChrome();
+          refreshHistoryActionAvailability();
+        }
+
+        function updateProgress() {
+          if (!state.job || state.job.status === "idle" || state.job.status === "ready") {
+            els.progressWrapper.style.display = "none";
+            return;
+          }
+          var total = state.job.total_pages || 0;
+          var processed = state.job.processed_count || 0;
+          if (total <= 0) {
+            els.progressWrapper.style.display = "none";
+            return;
+          }
+          els.progressWrapper.style.display = "flex";
+          var pct = Math.round((processed / total) * 100);
+          els.progressFill.style.width = pct + "%";
+          els.progressFill.className = processed >= total ? "progress-fill complete" : "progress-fill";
+          els.progressLabel.textContent = processed + "/" + total;
+        }
+
+        function normalizePageNum(value) {
+          var pageNum = Number(value);
+          return Number.isInteger(pageNum) && pageNum > 0 ? pageNum : null;
+        }
+
+        function normalizePageSummaries(pages) {
+          if (!Array.isArray(pages)) return [];
+          var normalized = [];
+          for (var i = 0; i < pages.length; i++) {
+            var item = pages[i];
+            var pageNum = normalizePageNum(item && item.page_num);
+            if (pageNum === null) continue;
+            normalized.push({ page_num: pageNum, status: item.status });
+          }
+          normalized.sort(function (a, b) { return a.page_num - b.page_num; });
+          return normalized;
+        }
+
+        function syncJobProgressBucket(pageNum, previousStatus, nextStatus) {
+          if (previousStatus === "done") jobDonePageSet.delete(pageNum);
+          else if (previousStatus === "failed") jobFailedPageSet.delete(pageNum);
+          if (nextStatus === "done") jobDonePageSet.add(pageNum);
+          else if (nextStatus === "failed") jobFailedPageSet.add(pageNum);
+        }
+
+        function replacePageSummaries(pages) {
+          state.pages = normalizePageSummaries(pages);
+          var nextNums = Object.create(null);
+          for (var pi = 0; pi < state.pages.length; pi++) {
+            nextNums[state.pages[pi].page_num] = true;
+          }
+          var prev = state.pageListSummaryByNum;
+          var merged = Object.create(null);
+          for (var key in prev) {
+            if (!Object.prototype.hasOwnProperty.call(prev, key)) continue;
+            var kn = Number(key);
+            if (nextNums[kn]) merged[kn] = prev[key];
+          }
+          state.pageListSummaryByNum = merged;
+          pageIndexByNum = Object.create(null);
+          pageOptionByNum = Object.create(null);
+          jobDonePageSet = new Set();
+          jobFailedPageSet = new Set();
+          for (var i = 0; i < state.pages.length; i++) {
+            var summary = state.pages[i];
+            pageIndexByNum[summary.page_num] = i;
+            syncJobProgressBucket(summary.page_num, null, summary.status);
+          }
+        }
+
+        function applyPageSummaryDelta(pageNum, status) {
+          var index = pageIndexByNum[pageNum];
+          var previousStatus = null;
+          if (typeof index === "number") {
+            previousStatus = state.pages[index].status;
+            if (previousStatus !== status) {
+              state.pages[index] = { page_num: pageNum, status: status };
+              syncJobProgressBucket(pageNum, previousStatus, status);
+            }
+            return { changed: previousStatus !== status, previousStatus: previousStatus };
+          }
+          var insertIndex = state.pages.length;
+          for (var i = 0; i < state.pages.length; i++) {
+            if (state.pages[i].page_num > pageNum) {
+              insertIndex = i;
+              break;
+            }
+          }
+          state.pages.splice(insertIndex, 0, { page_num: pageNum, status: status });
+          for (var j = insertIndex; j < state.pages.length; j++) {
+            pageIndexByNum[state.pages[j].page_num] = j;
+          }
+          syncJobProgressBucket(pageNum, null, status);
+          return { changed: true, previousStatus: null };
+        }
+
+        function historySortValue(value) {
+          var timestamp = Date.parse(value || "");
+          return Number.isNaN(timestamp) ? 0 : timestamp;
+        }
+
+        function normalizeHistoryJobs(items) {
+          if (!Array.isArray(items)) return [];
+          var normalized = [];
+          for (var i = 0; i < items.length; i++) {
+            var item = items[i] || {};
+            if (!item.job_id) continue;
+            var totalPages = Number(item.total_pages);
+            var processedCount = Number(item.processed_count);
+            var pdfName = typeof item.pdf_name === "string" ? item.pdf_name.trim() : "";
+            normalized.push({
+              job_id: String(item.job_id),
+              pdf_name: pdfName || "未命名 PDF",
+              status: typeof item.status === "string" ? item.status : "failed",
+              total_pages: Number.isFinite(totalPages) && totalPages > 0 ? totalPages : 0,
+              processed_count: Number.isFinite(processedCount) && processedCount >= 0 ? processedCount : 0,
+              created_at: typeof item.created_at === "string" ? item.created_at : "",
+              updated_at: typeof item.updated_at === "string" ? item.updated_at : "",
+            });
+          }
+          normalized.sort(function (a, b) {
+            return historySortValue(b.updated_at) - historySortValue(a.updated_at);
+          });
+          return normalized;
+        }
+
+        function formatHistoryTimestamp(value) {
+          if (!value) return "未知时间";
+          var parsed = new Date(value);
+          if (Number.isNaN(parsed.getTime())) return value;
+          return parsed.toLocaleString("zh-CN", { hour12: false });
+        }
+
+        function canDeleteHistoryJob(item) {
+          return !!item && item.status !== "extracting" && item.status !== "building";
+        }
+
+        function isHistoryActionBlocked() {
+          return state.pendingUpload || state.previewLoading || state.isBusy;
+        }
+
+        function syncPanelCollapsedState(panel, collapsed) {
+          if (!panel) return;
+          var shouldCollapse = !!collapsed;
+          panel.classList.toggle("collapsed", shouldCollapse);
+          panel.hidden = shouldCollapse;
+        }
+
+        function setHistoryPanelExpanded(expanded) {
+          historyPanelExpanded = !!expanded;
+          syncPanelCollapsedState(els.historyPanel, !historyPanelExpanded);
+          if (els.toggleHistoryBtn && !els.toggleHistoryBtn.classList.contains("hidden")) {
+            els.toggleHistoryBtn.classList.toggle("active", historyPanelExpanded);
+          }
+        }
+
+        function setConfigPanelExpanded(expanded) {
+          configPanelExpanded = !!expanded;
+          if (els.configPanel) {
+            syncPanelCollapsedState(els.configPanel, !configPanelExpanded);
+          }
+          if (els.toggleConfigBtn) {
+            els.toggleConfigBtn.classList.toggle("active", configPanelExpanded);
+          }
+        }
+
+        function applyHistoryJobActionAvailability(item, article) {
+          if (!item || !article) return;
+          var openBtn = article.querySelector('[data-history-action="open"]');
+          if (openBtn) {
+            openBtn.disabled = isHistoryActionBlocked();
+          }
+          var deleteBtn = article.querySelector('[data-history-action="delete"]');
+          if (!deleteBtn) return;
+          var deletable = canDeleteHistoryJob(item);
+          deleteBtn.disabled = !deletable || isHistoryActionBlocked();
+          deleteBtn.title = deletable ? "删除该历史任务" : "进行中的任务暂不可删除";
+        }
+
+        function refreshHistoryActionAvailability() {
+          if (!historyPanelExpanded) return;
+          for (var i = 0; i < state.historyJobs.length; i++) {
+            var item = state.historyJobs[i];
+            var article = historyItemByJobId[item.job_id];
+            if (!article || !article.parentNode) continue;
+            applyHistoryJobActionAvailability(item, article);
+          }
+        }
+
+        function createHistoryStatusSymbol(status) {
+          var el = document.createElement("span");
+          el.className = "history-status-symbol";
+          if (status === "failed") {
+            el.textContent = "\u2715";
+            el.setAttribute("aria-label", "\u5931\u8d25");
+            return el;
+          }
+          if (
+            status === "extracting"
+            || status === "building"
+            || status === "uploading"
+            || status === "previewing"
+          ) {
+            el.setAttribute("aria-label", "\u5904\u7406\u4e2d");
+            var blink = document.createElement("span");
+            blink.className = "history-work-indicator blink";
+            blink.setAttribute("aria-hidden", "true");
+            el.appendChild(blink);
+            return el;
+          }
+          el.textContent = "\u25c6";
+          el.setAttribute("aria-label", STATUS_LABELS[status] || status);
+          return el;
+        }
+
+        function renderHistoryJobItem(item) {
+          var isCurrent = state.jobId === item.job_id;
+          var deletable = canDeleteHistoryJob(item);
+          var article = document.createElement("article");
+          article.classList.add("history-item");
+          if (isCurrent) {
+            article.classList.add("history-item-active");
+          }
+          if (item.status === "failed") {
+            article.classList.add("history-item-failed");
+          }
+          article.setAttribute("data-history-job-id", item.job_id);
+
+          var main = document.createElement("div");
+          main.className = "history-item-main";
+
+          var heading = document.createElement("div");
+          heading.className = "history-item-heading";
+          heading.appendChild(createHistoryStatusSymbol(item.status));
+          var title = document.createElement("div");
+          title.className = "history-item-title";
+          title.textContent = item.pdf_name;
+          heading.appendChild(title);
+          if (isCurrent) {
+            var currentTag = document.createElement("span");
+            currentTag.className = "history-item-current";
+            currentTag.textContent = "\u5f53\u524d";
+            heading.appendChild(currentTag);
+          }
+          main.appendChild(heading);
+
+          var meta = document.createElement("div");
+          meta.className = "history-item-meta";
+          var time = document.createElement("span");
+          time.className = "history-item-detail";
+          time.textContent = formatHistoryTimestamp(item.created_at);
+          meta.appendChild(time);
+
+          if (!deletable) {
+            var warning = document.createElement("span");
+            warning.className = "history-item-warning";
+            warning.textContent = "\u8fdb\u884c\u4e2d\u4efb\u52a1\u6682\u4e0d\u53ef\u5220\u9664";
+            meta.appendChild(warning);
+          }
+
+          main.appendChild(meta);
+
+          var actions = document.createElement("div");
+          actions.className = "history-item-actions";
+
+          var openBtn = document.createElement("button");
+          openBtn.type = "button";
+          openBtn.className = "pixel-btn-sm";
+          openBtn.textContent = isCurrent ? "\u91cd\u65b0\u52a0\u8f7d" : "\u8fdb\u5165";
+          openBtn.disabled = false;
+          openBtn.setAttribute("data-history-action", "open");
+          openBtn.setAttribute("data-job-id", item.job_id);
+          actions.appendChild(openBtn);
+
+          var deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.className = "pixel-btn-sm";
+          deleteBtn.textContent = "\u5220\u9664";
+          deleteBtn.disabled = !deletable;
+          deleteBtn.title = deletable ? "\u5220\u9664\u8be5\u5386\u53f2\u4efb\u52a1" : "\u8fdb\u884c\u4e2d\u7684\u4efb\u52a1\u6682\u4e0d\u53ef\u5220\u9664";
+          deleteBtn.setAttribute("data-history-action", "delete");
+          deleteBtn.setAttribute("data-job-id", item.job_id);
+          actions.appendChild(deleteBtn);
+
+          article.appendChild(main);
+          article.appendChild(actions);
+          applyHistoryJobActionAvailability(item, article);
+          return article;
+        }
+
+        function renderHistoryList() {
+          state.historyJobs = normalizeHistoryJobs(state.historyJobs);
+          historyItemByJobId = Object.create(null);
+          historyDirty = false;
+          els.historyCount.textContent = state.historyJobs.length + " 条";
+          els.historyList.innerHTML = "";
+
+          if (state.historyJobs.length === 0) {
+            els.historyEmpty.classList.remove("hidden");
+            els.historyList.classList.add("hidden");
+            return;
+          }
+
+          els.historyEmpty.classList.add("hidden");
+          els.historyList.classList.remove("hidden");
+
+          for (var i = 0; i < state.historyJobs.length; i++) {
+            var item = state.historyJobs[i];
+            var article = renderHistoryJobItem(item);
+            historyItemByJobId[item.job_id] = article;
+            els.historyList.appendChild(article);
+          }
+        }
+
+        async function loadHistoryJobs() {
+          state.historyJobs = normalizeHistoryJobs(await requestJson("/api/jobs"));
+          historyJobsLoaded = true;
+          renderHistoryList();
+        }
+
+        async function refreshHistoryPanelOnExpand() {
+          if (!historyPanelExpanded) return;
+          if (!historyJobsLoaded || historyDirty) {
+            await loadHistoryJobs();
+            return;
+          }
+          refreshHistoryActionAvailability();
+        }
+
+        async function syncHistoryPanelOnDemand(forceSync) {
+          if (forceSync) {
+            historyDirty = true;
+          }
+          if (!historyPanelExpanded) return;
+          await refreshHistoryPanelOnExpand();
+        }
+
+        function updateCurrentHistoryJobState(patch) {
+          if (!state.jobId) return;
+          var item = state.historyJobs.find(function (entry) { return entry.job_id === state.jobId; });
+          if (!item) {
+            historyDirty = true;
+            return;
+          }
+          var changed = false;
+          if (patch.status && item.status !== patch.status) {
+            item.status = patch.status;
+            changed = true;
+          }
+          if (typeof patch.total_pages === "number" && item.total_pages !== patch.total_pages) {
+            item.total_pages = patch.total_pages;
+            changed = true;
+          }
+          if (typeof patch.processed_count === "number" && item.processed_count !== patch.processed_count) {
+            item.processed_count = patch.processed_count;
+            changed = true;
+          }
+          if (patch.updated_at && item.updated_at !== patch.updated_at) {
+            item.updated_at = patch.updated_at;
+            changed = true;
+          }
+          if (changed && !historyPanelExpanded) {
+            historyDirty = true;
+          }
+        }
+
+        function patchHistoryJobItem(jobId) {
+          if (!jobId) return;
+          if (!historyPanelExpanded) {
+            historyDirty = true;
+            return;
+          }
+          var item = null;
+          for (var i = 0; i < state.historyJobs.length; i++) {
+            if (state.historyJobs[i].job_id === jobId) {
+              item = state.historyJobs[i];
+              break;
+            }
+          }
+          if (!item) {
+            historyDirty = true;
+            return;
+          }
+          var current = historyItemByJobId[jobId];
+          if (!current || !current.parentNode) {
+            historyDirty = true;
+            return;
+          }
+          var next = renderHistoryJobItem(item);
+          current.parentNode.replaceChild(next, current);
+          historyItemByJobId[jobId] = next;
+        }
+
+        async function openHistoryJob(jobId) {
+          if (!jobId) return;
+          if (isHistoryActionBlocked()) {
+            throw new Error("当前操作进行中，请稍后再打开历史任务");
+          }
+          resetPreparedUploadState();
+          hidePdfStatusHint();
+          state.job = null;
+          state.jobId = jobId;
+          history.replaceState(null, "", "/jobs/" + encodeURIComponent(jobId));
+          setHistoryPanelExpanded(false);
+          log("history opened", { job_id: jobId });
+          await refreshWorkspace();
+        }
+
+        async function deleteHistoryJob(jobId) {
+          if (isHistoryActionBlocked()) {
+            throw new Error("当前操作进行中，请稍后再删除历史任务");
+          }
+          var item = state.historyJobs.find(function (entry) { return entry.job_id === jobId; });
+          if (!item) throw new Error("未找到目标历史任务");
+          if (!canDeleteHistoryJob(item)) {
+            throw new Error("进行中的任务暂不支持删除");
+          }
+          if (!window.confirm("删除后将移除本地任务文件：\n" + item.pdf_name + "\n\n是否继续？")) {
+            return;
+          }
+          await requestJson("/api/jobs/" + encodeURIComponent(jobId), { method: "DELETE" });
+          if (state.jobId === jobId) {
+            await resetActiveWorkspace();
+          }
+          await loadHistoryJobs();
+          log("history deleted", { job_id: jobId, pdf_name: item.pdf_name });
+        }
+
+        function getCurrentPageIndex() {
+          var currentPageNum = normalizePageNum(state.currentPageNum);
+          if (currentPageNum === null) return -1;
+          var index = pageIndexByNum[currentPageNum];
+          return typeof index === "number" ? index : -1;
+        }
+
+        function getPageNavigationTotal() {
+          if (state.pages.length > 0) {
+            return state.pages.length;
+          }
+          if (pdfDoc && Number.isInteger(pdfDoc.numPages) && pdfDoc.numPages > 0) {
+            return pdfDoc.numPages;
+          }
+          return 0;
+        }
+
+        function getCurrentNavigationIndex() {
+          if (state.pages.length > 0) {
+            var pageIndex = getCurrentPageIndex();
+            return pageIndex < 0 ? 0 : pageIndex;
+          }
+          var total = getPageNavigationTotal();
+          if (total === 0) return -1;
+          var currentPageNum = normalizePageNum(state.currentPageNum);
+          if (currentPageNum === null) return 0;
+          return Math.min(Math.max(currentPageNum - 1, 0), total - 1);
+        }
+
+        function getPageNumForNavigationIndex(index) {
+          if (state.pages.length > 0) {
+            if (index < 0 || index >= state.pages.length) return null;
+            return state.pages[index].page_num;
+          }
+          var total = getPageNavigationTotal();
+          if (index < 0 || index >= total) return null;
+          return index + 1;
+        }
+
+        function syncPageNavigationState() {
+          var total = getPageNavigationTotal();
+          if (total === 0) {
+            state.currentPageNum = 1;
+            els.pageSelect.value = "";
+            updatePageNavButtons(-1);
+            syncPdfFooterNavVisibility();
+            return;
+          }
+          var idx = getCurrentNavigationIndex();
+          var currentPageNum = getPageNumForNavigationIndex(idx);
+          state.currentPageNum = currentPageNum === null ? 1 : currentPageNum;
+          els.pageSelect.value = String(state.currentPageNum);
+          updatePageNavButtons(idx);
+          syncPdfFooterNavVisibility();
+        }
+
+        function setPageSelectOptionText(option, pageNum, status) {
+          if (typeof status === "string" && status.length > 0) {
+            option.textContent = "第 " + pageNum + " 页 (" + status + ")";
+            return;
+          }
+          option.textContent = "第 " + pageNum + " 页";
+        }
+
+        function patchPageSelectOption(pageNum) {
+          var normalizedPageNum = normalizePageNum(pageNum);
+          if (normalizedPageNum === null) return;
+          var index = pageIndexByNum[normalizedPageNum];
+          var option = pageOptionByNum[normalizedPageNum];
+          if (typeof index !== "number" || !option) {
+            updatePageSelect();
+            return;
+          }
+          setPageSelectOptionText(option, normalizedPageNum, state.pages[index].status);
+        }
+
+        function syncPdfFooterNavVisibility() {
+          var total = getPageNavigationTotal();
+          if (!els.pdfFooterNav) return;
+          if (total <= 0) {
+            els.pdfFooterNav.style.display = "none";
+            return;
+          }
+          els.pdfFooterNav.style.display = "";
+          els.pdfFooterNav.classList.remove("sr-only");
+          els.pdfFooterNav.removeAttribute("aria-hidden");
+        }
+
+        function updatePageSelect() {
+          pageOptionByNum = Object.create(null);
+          els.pageSelect.innerHTML = "";
+          if (state.pages.length > 0) {
+            for (var i = 0; i < state.pages.length; i++) {
+              var item = state.pages[i];
+              var option = document.createElement("option");
+              option.value = String(item.page_num);
+              setPageSelectOptionText(option, item.page_num, item.status);
+              pageOptionByNum[item.page_num] = option;
+              els.pageSelect.appendChild(option);
+            }
+          } else {
+            var total = getPageNavigationTotal();
+            for (var pageNum = 1; pageNum <= total; pageNum++) {
+              var fallbackOption = document.createElement("option");
+              fallbackOption.value = String(pageNum);
+              setPageSelectOptionText(fallbackOption, pageNum);
+              pageOptionByNum[pageNum] = fallbackOption;
+              els.pageSelect.appendChild(fallbackOption);
+            }
+          }
+          syncPageNavigationState();
+        }
+
+        function updatePageNavButtons(currentIndex) {
+          var total = getPageNavigationTotal();
+          if (total === 0) {
+            els.prevPageBtn.disabled = true;
+            els.nextPageBtn.disabled = true;
+            return;
+          }
+          var idx = typeof currentIndex === "number" ? currentIndex : getCurrentNavigationIndex();
+          if (idx < 0) {
+            idx = 0;
+          }
+          els.prevPageBtn.disabled = idx <= 0;
+          els.nextPageBtn.disabled = idx >= total - 1;
+        }
+
+        function updatePageStatusIndicator() {
+          var status = state.currentPage ? state.currentPage.status : "pending";
+          /* 页面状态由顶栏与进度条传达，编辑器上方不再占行显示 ◆ / ✕ */
+          els.pageStatusIndicator.className = "page-status-bar page-status-inline status-" + status + " hidden";
+          if (!els.pageStatusText || !els.pageStatusText.classList) return;
+          els.pageStatusText.classList.remove("blink");
+          els.pageStatusText.textContent = "";
+        }
+
+        /* ── Config ───────────────────────────── */
+        function applyConfigToForm(config) {
+          ensureModelOption(config.model.name);
+          els.modelName.value = config.model.name;
+          els.timeout.value = String(config.model.timeout);
+          els.dpi.value = String(config.extract.dpi);
+          els.concurrency.value = String(config.extract.concurrency);
+          els.maxRetries.value = String(config.extract.max_retries);
+          els.prompt.value = config.extract.prompt;
+          els.apiKey.value = "";
+          updateHasKeyBadge(config.has_api_key);
+        }
+
+        async function loadConfig() {
+          var config = await requestJson("/api/config");
+          applyConfigToForm(config);
+          log("config loaded", { has_api_key: config.has_api_key });
+        }
+
+        function ensureModelOption(name) {
+          if (!name) return;
+          var select = els.modelName;
+          for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === name) return;
+          }
+          var option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          select.appendChild(option);
+        }
+
+        function collectConfigPayload() {
+          var payload = {
+            model: {
+              name: els.modelName.value,
+              timeout: Number(els.timeout.value),
+            },
+            extract: {
+              dpi: Number(els.dpi.value),
+              concurrency: Number(els.concurrency.value),
+              max_retries: Number(els.maxRetries.value),
+              prompt: els.prompt.value,
+            },
+          };
+          var apiKey = els.apiKey.value.trim();
+          if (apiKey) payload.api_key = apiKey;
+          return payload;
+        }
+
+        function updateConfigUi(updated) {
+          applyConfigToForm(updated);
+        }
+
+        async function persistConfig() {
+          var updated = await requestJson("/api/config", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(collectConfigPayload()),
+          });
+          updateConfigUi(updated);
+          return updated;
+        }
+
+        async function restoreInitialConfig() {
+          var restored = await requestJson("/api/config/reset", {
+            method: "POST",
+          });
+          updateConfigUi(restored);
+          setConfigTestStatus("", "");
+          log("config restored to defaults", { has_api_key: restored.has_api_key });
+          return restored;
+        }
+
+        function setConfigTestStatus(kind, message) {
+          els.configTestStatus.textContent = message || "";
+          var className = "config-test-status";
+          if (kind === "success") className += " is-success";
+          if (kind === "error") className += " is-error";
+          if (kind === "pending") className += " is-pending";
+          els.configTestStatus.className = className;
+        }
+
+        async function saveConfig(event) {
+          event.preventDefault();
+          var updated = await persistConfig();
+          log("config updated", { has_api_key: updated.has_api_key });
+        }
+
+        async function testConfigConnection() {
+          setConfigTestStatus("pending", "正在保存并测试连接...");
+          state.isBusy = true;
+          updateControlAvailability();
+          try {
+            var updated = await persistConfig();
+            log("config updated", { has_api_key: updated.has_api_key });
+            var result = await requestJson("/api/config/test-connection", {
+              method: "POST",
+            });
+            var statusText = result.message;
+            if (result.reply_preview) {
+              statusText = statusText + "：" + result.reply_preview;
+            }
+            setConfigTestStatus(result.ok ? "success" : "error", statusText);
+            log("config connection tested", { ok: result.ok });
+          } catch (error) {
+            setConfigTestStatus("error", String(error));
+            throw error;
+          } finally {
+            state.isBusy = false;
+            updateControlAvailability();
+          }
+        }
+
+        function updateHasKeyBadge(hasKey) {
+          els.configHasKey.textContent = hasKey ? "API Key 已配置" : "API Key 未设置";
+          els.configHasKey.className = hasKey ? "has-key-badge" : "has-key-badge no-key";
+        }
+
+        /* ── Job Creation ─────────────────────── */
+        async function prepareFileForExtraction(file) {
+          if (!file) return;
+          if (state.pendingUpload || state.previewLoading) {
+            throw new Error("当前 PDF 正在处理中，请稍后再试");
+          }
+          cancelPendingPageSave();
+          closeStream();
+          history.replaceState(null, "", "/");
+          state.jobId = null;
+          state.job = null;
+          resetPreparedUploadState();
+          state.preparedFile = file;
+          state.previewLoading = true;
+          resetEditors();
+          updateControlAvailability();
+          showPdfStatusHint("正在载入本地 PDF 预览...", "empty-overlay");
+          try {
+            await previewLocalPdf(file);
+            state.previewReady = true;
+            hidePdfStatusHint();
+            log("local preview ready", { file_name: file.name || "source.pdf" });
+          } catch (error) {
+            resetPreparedUploadState();
+            revokeLocalPreviewUrl();
+            resetEditors();
+            showPdfStatusHint("PDF 预览加载失败，请重新选择文件。", "toast");
+            throw error;
+          } finally {
+            state.previewLoading = false;
+            updateControlAvailability();
+          }
+        }
+
+        async function runSinglePageTestForPreparedFile() {
+          if (!state.preparedFile) throw new Error("请先选择 PDF 文件");
+          if (!state.previewReady) throw new Error("PDF 预览尚未加载完成");
+          if (state.jobId || state.job) throw new Error("当前已有活跃任务");
+          if (state.singlePageTest && state.singlePageTest.status === "running") {
+            throw new Error("单页测试正在进行中");
+          }
+          var snapshotPageNum = Number.isInteger(state.currentPageNum) && state.currentPageNum > 0
+            ? state.currentPageNum
+            : 1;
+          state.singlePageTest = {
+            status: "running",
+            pageNum: snapshotPageNum,
+            content: null,
+            error: null,
+          };
+          updateControlAvailability();
+          var formData = new FormData();
+          formData.append("file", state.preparedFile, state.preparedFile.name || "source.pdf");
+          formData.append("page_num", String(snapshotPageNum));
+          try {
+            var result = await requestJson("/api/extraction/single-page-preview", {
+              method: "POST",
+              body: formData,
+            });
+            state.singlePageTest = {
+              status: "done",
+              pageNum: snapshotPageNum,
+              content: typeof result.content === "string" ? result.content : "",
+              error: null,
+            };
+            log("single-page test done", { page_num: snapshotPageNum });
+          } catch (error) {
+            var code = "";
+            var message = "";
+            if (error && typeof error === "object" && error.appError) {
+              code = typeof error.appError.code === "string" ? error.appError.code : "";
+              message = typeof error.appError.message === "string"
+                ? error.appError.message
+                : String(error.message || error);
+            } else {
+              message = error && error.message ? String(error.message) : String(error);
+            }
+            state.singlePageTest = {
+              status: "failed",
+              pageNum: snapshotPageNum,
+              content: null,
+              error: { code: code || "UNEXPECTED_ERROR", message: message || "单页测试失败" },
+            };
+            log("single-page test failed", { page_num: snapshotPageNum, code: code });
+          } finally {
+            updateControlAvailability();
+          }
+        }
+
+        async function startExtractionForPreparedFile() {
+          if (!state.preparedFile) throw new Error("请先选择 PDF 文件");
+          if (!state.previewReady) throw new Error("PDF 预览尚未加载完成");
+          if (state.jobId || state.job) throw new Error("当前已有活跃任务");
+          var preserveExistingPdf = hasLocalPdfPreviewLoaded();
+          state.pendingUpload = true;
+          updateControlAvailability();
+          showPdfStatusHint("正在上传 PDF 并创建任务...", "toast");
+          var formData = new FormData();
+          formData.append("file", state.preparedFile, state.preparedFile.name || "source.pdf");
+          try {
+            var result = await requestJson("/api/jobs", { method: "POST", body: formData });
+            state.jobId = result.job_id;
+            state.job = {
+              job_id: result.job_id,
+              status: result.status,
+              total_pages: result.total_pages,
+              succeeded_pages: [],
+              failed_pages: [],
+              processed_count: 0,
+            };
+            resetPreparedUploadState();
+            history.replaceState(null, "", "/jobs/" + encodeURIComponent(result.job_id));
+            log("job created", result);
+            showPdfStatusHint("任务已创建，正在同步工作区...", "toast");
+            await refreshWorkspace({ preserveExistingPdf: preserveExistingPdf });
+          } finally {
+            state.pendingUpload = false;
+            hidePdfStatusHint();
+            updateControlAvailability();
+          }
+        }
+
+        /* ── Page Operations ──────────────────── */
+        async function loadCurrentPage(targetPageNum) {
+          var pageNum = normalizePageNum(
+            typeof targetPageNum === "undefined" ? state.currentPageNum : targetPageNum
+          );
+          if (!state.jobId || pageNum === null) return;
+          var snapshotJobId = state.jobId;
+          var page = await requestJson(
+            "/api/jobs/" + encodeURIComponent(snapshotJobId) + "/pages/" + pageNum
+          );
+          if (state.jobId !== snapshotJobId || state.currentPageNum !== pageNum) {
+            return;
+          }
+          state.currentPage = page;
+          els.pageEditor.value = state.currentPage.content || "";
+          els.pageError.textContent = state.currentPage.error || "";
+          if (typeof rememberPageLineFromContent === "function") {
+            rememberPageLineFromContent(pageNum, state.currentPage.content || "");
+          }
+          updatePageStatusIndicator();
+          updateControlAvailability();
+        }
+
+        async function loadPages() {
+          if (!state.jobId) return;
+          replacePageSummaries(
+            await requestJson("/api/jobs/" + encodeURIComponent(state.jobId) + "/pages")
+          );
+          updatePageSelect();
+          if (state.pages.length > 0) {
+            await loadCurrentPage();
+          } else {
+            state.currentPage = null;
+            els.pageEditor.value = "";
+            els.pageError.textContent = "";
+            updatePageStatusIndicator();
+          }
+          if (typeof hydratePageListSummaries === "function") {
+            await hydratePageListSummaries();
+          }
+        }
+
+        /* ── Output Operations ────────────────── */
+        async function loadOutput() {
+          if (!state.jobId) return;
+          state.output = await requestJson("/api/jobs/" + encodeURIComponent(state.jobId) + "/output");
+          els.outputEditor.value = state.output.content || "";
+          els.outputDownloadLink.href = "/api/jobs/" + encodeURIComponent(state.jobId) + "/output/download";
+        }
+
+        /* ── Workspace Refresh ────────────────── */
+        async function refreshWorkspace(options) {
+          if (!state.jobId) return;
+          var opts = options || {};
+          var preserveExistingPdf = !!opts.preserveExistingPdf;
+          closeStream();
+          state.job = await requestJson("/api/jobs/" + encodeURIComponent(state.jobId));
+          updateControlAvailability();
+
+          if (state.job.status === "building") {
+            state.isBusy = true;
+            updateControlAvailability();
+            var attempts = 0;
+            while (attempts < 60 && state.job.status === "building") {
+              await new Promise(function (resolve) { setTimeout(resolve, 300); });
+              state.job = await requestJson("/api/jobs/" + encodeURIComponent(state.jobId));
+              attempts += 1;
+            }
+            state.isBusy = false;
+            updateControlAvailability();
+          }
+
+          if (state.job.status === "ready") {
+            await loadOutput();
+          } else {
+            clearOutputState();
+            await loadPages();
+            if (state.job.status === "extracting") {
+              connectStream();
+            }
+          }
+
+          await syncHistoryPanelOnDemand(true);
+          var sourcePdfUrl = "/api/jobs/" + encodeURIComponent(state.jobId) + "/source";
+          var shouldPreserveExistingPdf = preserveExistingPdf && hasLocalPdfPreviewLoaded();
+          if (!shouldPreserveExistingPdf) {
+            showPdfStatusHint("正在载入 PDF 预览...", "empty-overlay");
+            await loadPdfDocument(sourcePdfUrl);
+            hidePdfStatusHint();
+          }
+          updateControlAvailability();
+          log("workspace refreshed", { job_id: state.jobId, status: state.job.status });
+        }
+
+        /* ── SSE Stream ───────────────────────── */
+        function updateJobProgressFromPageEvent(event) {
+          if (!state.job) return;
+          state.job.processed_count = event.processed_count;
+          state.job.total_pages = event.total_pages;
+          state.job.succeeded_pages = Array.from(jobDonePageSet).sort(function (a, b) { return a - b; });
+          state.job.failed_pages = Array.from(jobFailedPageSet).sort(function (a, b) { return a - b; });
+          updateCurrentHistoryJobState({
+            status: state.job.status,
+            processed_count: event.processed_count,
+            total_pages: event.total_pages,
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        function schedulePageEventUiFlush(patch) {
+          if (!pendingUiFlush) {
+            pendingUiFlush = { pageNums: new Set(), historyJobIds: new Set() };
+          }
+          if (patch && Array.isArray(patch.pageNums)) {
+            for (var i = 0; i < patch.pageNums.length; i++) {
+              var pageNum = normalizePageNum(patch.pageNums[i]);
+              if (pageNum !== null) pendingUiFlush.pageNums.add(pageNum);
+            }
+          }
+          if (patch && Array.isArray(patch.historyJobIds)) {
+            for (var j = 0; j < patch.historyJobIds.length; j++) {
+              var jobId = patch.historyJobIds[j];
+              if (jobId) pendingUiFlush.historyJobIds.add(jobId);
+            }
+          }
+          if (pendingUiFrameId !== null) return;
+          if (!window.requestAnimationFrame) {
+            flushPageEventUi();
+            return;
+          }
+          pendingUiFrameId = window.requestAnimationFrame(function () {
+            flushPageEventUi();
+          });
+        }
+
+        function flushPageEventUi() {
+          pendingUiFrameId = null;
+          if (!pendingUiFlush) return;
+          var patch = pendingUiFlush;
+          pendingUiFlush = null;
+          patch.pageNums.forEach(function (pageNum) {
+            patchPageSelectOption(pageNum);
+          });
+          if (patch.pageNums.size > 0) {
+            syncPageNavigationState();
+          }
+          if (patch.historyJobIds.size > 0) {
+            if (!historyPanelExpanded) {
+              historyDirty = true;
+            } else {
+              patch.historyJobIds.forEach(function (jobId) {
+                patchHistoryJobItem(jobId);
+              });
+            }
+          }
+        }
+
+        function shouldReloadCurrentPageFromPageEvent(pageNum, previousStatus, nextStatus) {
+          if (pageNum !== state.currentPageNum) return false;
+          if (nextStatus !== "done" && nextStatus !== "failed") return false;
+          if (!state.currentPage || state.currentPage.page_num !== pageNum) return true;
+          return previousStatus !== nextStatus || state.currentPage.status !== nextStatus;
+        }
+
+        function applyCurrentPageStatusFromEvent(pageNum, status) {
+          if (pageNum !== state.currentPageNum) return;
+          if (!state.currentPage || state.currentPage.page_num !== pageNum) {
+            state.currentPage = {
+              page_num: pageNum,
+              status: status,
+              content: "",
+              error: "",
+            };
+          } else {
+            state.currentPage.status = status;
+            if (status !== "failed") {
+              state.currentPage.error = "";
+            }
+          }
+          updatePageStatusIndicator();
+        }
+
+        async function onStreamEvent(payload) {
+          if (!state.job) return;
+          if (payload.type === "page") {
+            var eventPageNum = normalizePageNum(payload.page_num);
+            if (eventPageNum === null) {
+              log("sse page ignored", { page_num: payload.page_num });
+              return;
+            }
+            var pageDelta = applyPageSummaryDelta(eventPageNum, payload.status);
+            var shouldReloadCurrentPage = shouldReloadCurrentPageFromPageEvent(
+              eventPageNum,
+              pageDelta.previousStatus,
+              payload.status
+            );
+            updateJobProgressFromPageEvent(payload);
+            schedulePageEventUiFlush({
+              pageNums: pageDelta.changed ? [eventPageNum] : [],
+              historyJobIds: state.jobId ? [state.jobId] : [],
+            });
+            updateProgress();
+            if (eventPageNum === state.currentPageNum) {
+              applyCurrentPageStatusFromEvent(eventPageNum, payload.status);
+              updateControlAvailability();
+              if (shouldReloadCurrentPage) {
+                await loadCurrentPage();
+              }
+            } else if (
+              (payload.status === "done" || payload.status === "failed")
+              && typeof fetchPageSummarySnippet === "function"
+            ) {
+              void fetchPageSummarySnippet(eventPageNum);
+            }
+            log("sse page", payload);
+            return;
+          }
+          if (payload.type === "complete") {
+            state.job.status = "extracted";
+            state.job.processed_count = payload.processed_count;
+            state.job.total_pages = payload.total_pages;
+            state.job.succeeded_pages = payload.succeeded_pages.slice();
+            state.job.failed_pages = payload.failed_pages.slice();
+            updateCurrentHistoryJobState({
+              status: state.job.status,
+              processed_count: payload.processed_count,
+              total_pages: payload.total_pages,
+              updated_at: new Date().toISOString(),
+            });
+            schedulePageEventUiFlush({
+              historyJobIds: state.jobId ? [state.jobId] : [],
+            });
+            closeStream();
+            updateControlAvailability();
+            log("sse complete", payload);
+            return;
+          }
+          if (payload.type === "failed") {
+            state.job.status = "failed";
+            updateCurrentHistoryJobState({
+              status: state.job.status,
+              processed_count: state.job.processed_count,
+              total_pages: state.job.total_pages,
+              updated_at: new Date().toISOString(),
+            });
+            schedulePageEventUiFlush({
+              historyJobIds: state.jobId ? [state.jobId] : [],
+            });
+            closeStream();
+            updateControlAvailability();
+            log("sse failed", payload);
+          }
+        }
+
+        function connectStream() {
+          if (!state.jobId) return;
+          closeStream();
+          var source = new EventSource("/api/jobs/" + encodeURIComponent(state.jobId) + "/stream");
+          source.onmessage = async function (event) {
+            try {
+              var payload = JSON.parse(event.data);
+              await onStreamEvent(payload);
+            } catch (error) {
+              log("sse parse error", { message: String(error) });
+            }
+          };
+          source.onerror = function () { log("sse error"); };
+          state.stream = source;
+          log("sse connected", { job_id: state.jobId });
+        }
+
+        /* ── Page Save / Retry ────────────────── */
+        function applySavedPage(saved) {
+          var pageNum = normalizePageNum(saved && saved.page_num);
+          if (pageNum === null) return;
+          var savedPage = {
+            page_num: pageNum,
+            status: saved.status,
+            content: typeof saved.content === "string" ? saved.content : "",
+            error: typeof saved.error === "string" ? saved.error : "",
+          };
+          if (state.currentPageNum === pageNum) {
+            state.currentPage = savedPage;
+          }
+          if (state.currentPageNum === pageNum) {
+            els.pageEditor.value = state.currentPage.content;
+            els.pageError.textContent = state.currentPage.error;
+          }
+          if (typeof applyPageSummaryDelta === "function") {
+            applyPageSummaryDelta(pageNum, saved.status);
+          } else {
+            var idx = state.pages.findIndex(function (item) { return item.page_num === pageNum; });
+            if (idx >= 0) {
+              state.pages[idx] = { page_num: pageNum, status: saved.status };
+            } else {
+              state.pages.push({ page_num: pageNum, status: saved.status });
+              state.pages.sort(function (a, b) { return a.page_num - b.page_num; });
+            }
+          }
+          if (state.job) {
+            if (typeof jobDonePageSet !== "undefined" && typeof jobFailedPageSet !== "undefined") {
+              state.job.succeeded_pages = Array.from(jobDonePageSet).sort(function (a, b) { return a - b; });
+              state.job.failed_pages = Array.from(jobFailedPageSet).sort(function (a, b) { return a - b; });
+            } else {
+              var done = [];
+              var failed = [];
+              for (var i = 0; i < state.pages.length; i++) {
+                if (state.pages[i].status === "done") done.push(state.pages[i].page_num);
+                else if (state.pages[i].status === "failed") failed.push(state.pages[i].page_num);
+              }
+              state.job.succeeded_pages = done;
+              state.job.failed_pages = failed;
+            }
+            var processed = state.job.succeeded_pages.length + state.job.failed_pages.length;
+            state.job.processed_count = processed;
+            // 与后端 save_page / 领域规则对齐：EXTRACTING 下仅当全部页终态且无失败页时才跃迁为 EXTRACTED。
+            // 后端不会把 EXTRACTED 降级回 EXTRACTING，因此此处同样保持单调（不向 extracting 回退）。
+            if (
+              state.job.status === "extracting" &&
+              typeof state.job.total_pages === "number" &&
+              processed === state.job.total_pages &&
+              (!state.job.failed_pages || state.job.failed_pages.length === 0)
+            ) {
+              state.job.status = "extracted";
+            }
+          }
+          var updatedAt = new Date().toISOString();
+          var historyPatch = { updated_at: updatedAt };
+          if (state.job) {
+            historyPatch.status = state.job.status;
+            historyPatch.processed_count = state.job.processed_count;
+            historyPatch.total_pages = state.job.total_pages;
+          }
+          updateCurrentHistoryJobState(historyPatch);
+          if (state.jobId) {
+            schedulePageEventUiFlush({
+              historyJobIds: [state.jobId],
+            });
+          }
+          if (state.currentPageNum === pageNum) {
+            updatePageStatusIndicator();
+          }
+          if (typeof rememberPageLineFromContent === "function") {
+            rememberPageLineFromContent(pageNum, savedPage.content || "");
+          }
+          if (typeof patchPageSelectOption === "function") {
+            patchPageSelectOption(pageNum);
+            syncPageNavigationState();
+          } else {
+            updatePageSelect();
+          }
+          updateControlAvailability();
+        }
+
+        async function saveCurrentPage() {
+          if (!state.jobId) throw new Error("没有活跃任务");
+          var content = els.pageEditor.value;
+          var saved = await requestJson(
+            "/api/jobs/" + encodeURIComponent(state.jobId) + "/pages/" + state.currentPageNum,
+            { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: content }) }
+          );
+          applySavedPage(saved);
+          log("page saved", saved);
+        }
+
+        function applyRetriedPageToWorkspaceState(pageNum) {
+          var retryDelta = applyPageSummaryDelta(pageNum, "extracting");
+          if (state.pageListSummaryByNum) {
+            delete state.pageListSummaryByNum[pageNum];
+          }
+          if (state.currentPageNum === pageNum) {
+            if (!state.currentPage || state.currentPage.page_num !== pageNum) {
+              state.currentPage = {
+                page_num: pageNum,
+                status: "extracting",
+                content: "",
+                error: "",
+              };
+            } else {
+              state.currentPage.status = "extracting";
+              state.currentPage.content = "";
+              state.currentPage.error = "";
+            }
+            els.pageEditor.value = "";
+            els.pageError.textContent = "";
+            updatePageStatusIndicator();
+          }
+          if (state.job) {
+            state.job.status = "extracting";
+            state.job.succeeded_pages = Array.from(jobDonePageSet).sort(function (a, b) { return a - b; });
+            state.job.failed_pages = Array.from(jobFailedPageSet).sort(function (a, b) { return a - b; });
+            state.job.processed_count = state.job.succeeded_pages.length + state.job.failed_pages.length;
+            updateCurrentHistoryJobState({
+              status: state.job.status,
+              processed_count: state.job.processed_count,
+              total_pages: state.job.total_pages,
+              updated_at: new Date().toISOString(),
+            });
+          }
+          if (state.jobId) {
+            schedulePageEventUiFlush({
+              pageNums: retryDelta.changed ? [pageNum] : [],
+              historyJobIds: [state.jobId],
+            });
+          }
+          updateProgress();
+        }
+
+        async function retryCurrentPage() {
+          if (!state.jobId) throw new Error("没有活跃任务");
+          if (!state.job) throw new Error("没有活跃任务");
+          var workspaceStatus = getWorkspaceStatus();
+          if (workspaceStatus !== "extracting" && workspaceStatus !== "extracted") {
+            throw new Error("当前任务状态不支持重新提取");
+          }
+          var currentPageNum = Number(state.currentPageNum);
+          if (!Number.isInteger(currentPageNum) || currentPageNum <= 0) {
+            throw new Error("当前页码无效");
+          }
+          var currentPageStatus = "";
+          for (var pageStatusIndex = 0; pageStatusIndex < state.pages.length; pageStatusIndex++) {
+            var pageSummary = state.pages[pageStatusIndex];
+            if (pageSummary && pageSummary.page_num === currentPageNum) {
+              currentPageStatus = pageSummary.status;
+              break;
+            }
+          }
+          if (!currentPageStatus && state.currentPage && state.currentPage.page_num === currentPageNum) {
+            currentPageStatus = state.currentPage.status;
+          }
+          if (currentPageStatus !== "done" && currentPageStatus !== "failed") {
+            throw new Error("当前页尚未完成首次提取，暂不可重新提取");
+          }
+          var preserveExistingPdf = hasLocalPdfPreviewLoaded();
+          var shouldApplyRetryLocally = workspaceStatus === "extracting" && !!state.stream;
+          state.isBusy = true;
+          updateControlAvailability();
+          try {
+            var retried = await requestJson(
+              "/api/jobs/" + encodeURIComponent(state.jobId) + "/pages/" + currentPageNum + "/retry",
+              { method: "POST" }
+            );
+            log("page retried", retried);
+            if (shouldApplyRetryLocally) {
+              applyRetriedPageToWorkspaceState(currentPageNum);
+            } else {
+              await refreshWorkspace({ preserveExistingPdf: preserveExistingPdf });
+            }
+          } finally {
+            state.isBusy = false;
+            updateControlAvailability();
+          }
+        }
+
+        /* ── Page Auto Save ───────────────────── */
+        var pageAutoSaveTimer = null;
+        var PAGE_AUTO_SAVE_DELAY_MS = 600;
+
+        function cancelPendingPageSave() {
+          if (pageAutoSaveTimer !== null) {
+            window.clearTimeout(pageAutoSaveTimer);
+            pageAutoSaveTimer = null;
+          }
+        }
+
+        function canAutoSaveCurrentPage() {
+          if (!state.jobId || !state.currentPage) return false;
+          if (state.isBusy) return false;
+          var status = getWorkspaceStatus();
+          if (status === "building" || status === "ready") return false;
+          return !els.pageEditor.disabled;
+        }
+
+        function schedulePageAutoSave() {
+          if (!canAutoSaveCurrentPage()) return;
+          cancelPendingPageSave();
+          pageAutoSaveTimer = window.setTimeout(function () {
+            pageAutoSaveTimer = null;
+            runAction(saveCurrentPage);
+          }, PAGE_AUTO_SAVE_DELAY_MS);
+        }
+
+        async function flushPendingPageSave() {
+          if (pageAutoSaveTimer === null) return;
+          cancelPendingPageSave();
+          if (!canAutoSaveCurrentPage()) return;
+          await saveCurrentPage();
+        }
+
+        /* ── Build / Output ───────────────────── */
+        async function buildOutput(mergeMode) {
+          if (!state.jobId) throw new Error("没有活跃任务");
+          closeBuildOutputMenu();
+          var normalizedMergeMode = normalizeBuildMergeMode(mergeMode);
+          state.isBusy = true;
+          updateControlAvailability();
+          try {
+            var result = await requestJson(
+              "/api/jobs/" + encodeURIComponent(state.jobId) + "/build",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ merge_mode: normalizedMergeMode }),
+              }
+            );
+            log("build completed", { status: result.status, merge_mode: normalizedMergeMode });
+          } finally {
+            state.isBusy = false;
+          }
+          await refreshWorkspace();
+        }
+
+        async function discardOutput() {
+          if (!state.jobId) throw new Error("没有活跃任务");
+          if (!window.confirm("回退后，当前文档中的修改将被丢弃，是否继续？")) {
+            return;
+          }
+          state.isBusy = true;
+          updateControlAvailability();
+          try {
+            var result = await requestJson(
+              "/api/jobs/" + encodeURIComponent(state.jobId) + "/output/discard",
+              { method: "POST" }
+            );
+            clearOutputState();
+            log("output discarded", { status: result.status });
+          } finally {
+            state.isBusy = false;
+          }
+          await refreshWorkspace();
+        }
+
+        async function saveOutput() {
+          if (!state.jobId) throw new Error("没有活跃任务");
+          var result = await requestJson(
+            "/api/jobs/" + encodeURIComponent(state.jobId) + "/output",
+            { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: els.outputEditor.value }) }
+          );
+          if (state.output) {
+            state.output.content = result.content;
+            state.output.updated_at = result.updated_at;
+          } else {
+            state.output = result;
+          }
+          log("output saved", { updated_at: result.updated_at });
+        }
+
+        /* ── Output Auto Save ─────────────────── */
+        var outputAutoSaveTimer = null;
+        var OUTPUT_AUTO_SAVE_DELAY_MS = 600;
+
+        function cancelPendingOutputSave() {
+          if (outputAutoSaveTimer !== null) {
+            window.clearTimeout(outputAutoSaveTimer);
+            outputAutoSaveTimer = null;
+          }
+        }
+
+        function canAutoSaveOutput() {
+          if (!state.jobId) return false;
+          if (state.isBusy) return false;
+          if (getWorkspaceStatus() !== "ready") return false;
+          return !els.outputEditor.disabled;
+        }
+
+        function scheduleOutputAutoSave() {
+          if (!canAutoSaveOutput()) return;
+          cancelPendingOutputSave();
+          outputAutoSaveTimer = window.setTimeout(function () {
+            outputAutoSaveTimer = null;
+            runAction(saveOutput);
+          }, OUTPUT_AUTO_SAVE_DELAY_MS);
+        }
+
+        async function flushPendingOutputSave() {
+          if (outputAutoSaveTimer === null) return;
+          cancelPendingOutputSave();
+          if (!canAutoSaveOutput()) return;
+          await saveOutput();
+        }
+
+        /* ── Page Navigation ──────────────────── */
+        async function onPageSelectionChanged() {
+          var nextPageNum = normalizePageNum(els.pageSelect.value);
+          if (nextPageNum === null) return;
+          var pendingSavePromise = flushPendingPageSave();
+          state.currentPageNum = nextPageNum;
+          syncPageNavigationState();
+          updateControlAvailability();
+          await renderPdfPage(nextPageNum);
+          await pendingSavePromise;
+          await loadCurrentPage(nextPageNum);
+        }
+
+        function goPrevPage() {
+          var idx = getCurrentNavigationIndex();
+          var prevPageNum = getPageNumForNavigationIndex(idx - 1);
+          if (prevPageNum !== null) {
+            els.pageSelect.value = String(prevPageNum);
+            runAction(onPageSelectionChanged);
+          }
+        }
+
+        function goNextPage() {
+          var idx = getCurrentNavigationIndex();
+          var nextPageNum = getPageNumForNavigationIndex(idx + 1);
+          if (nextPageNum !== null) {
+            els.pageSelect.value = String(nextPageNum);
+            runAction(onPageSelectionChanged);
+          }
+        }
+
+        /* ── Action Runner ────────────────────── */
+        async function runAction(action) {
+          try {
+            await action();
+          } catch (error) {
+            log("action error", { message: String(error) });
+          }
+        }
+
+        /* ── Panel Toggles ────────────────────── */
+        els.toggleHistoryBtn.addEventListener("click", function () {
+          var shouldExpand = els.historyPanel.classList.contains("collapsed");
+          setHistoryPanelExpanded(shouldExpand);
+          if (shouldExpand) {
+            runAction(refreshHistoryPanelOnExpand);
+          }
+        });
+
+        els.toggleConfigBtn.addEventListener("click", function () {
+          setConfigPanelExpanded(!configPanelExpanded);
+        });
+
+        els.toggleEventsBtn.addEventListener("click", function () {
+          setEventsLogExpanded(!eventsLogExpanded);
+        });
+
+        /* ── PDF Upload (button click) ────────── */
+        els.uploadPdfBtn.addEventListener("click", function () {
+          els.pdfFileInput.click();
+        });
+        els.uploadPdfHeaderBtn.addEventListener("click", function () {
+          els.pdfFileInput.click();
+        });
+        els.pdfFileInput.addEventListener("change", function () {
+          var file = els.pdfFileInput.files && els.pdfFileInput.files[0];
+          if (file) {
+            runAction(function () { return prepareFileForExtraction(file); });
+          }
+          els.pdfFileInput.value = "";
+        });
+
+        /* ── Drag & Drop ─────────────────────── */
+        els.pdfDropZone.addEventListener("dragenter", function (e) {
+          e.preventDefault();
+        });
+
+        els.pdfDropZone.addEventListener("dragover", function (e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        });
+
+        els.pdfDropZone.addEventListener("drop", function (e) {
+          e.preventDefault();
+          var files = e.dataTransfer && e.dataTransfer.files;
+          if (files && files.length > 0) {
+            var file = files[0];
+            if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+              runAction(function () { return prepareFileForExtraction(file); });
+            } else {
+              log("drop error", { message: "请拖放 PDF 文件" });
+            }
+          }
+        });
+
+        document.addEventListener("dragover", function (e) { e.preventDefault(); });
+        document.addEventListener("drop", function (e) { e.preventDefault(); });
+        if (els.workspaceDivider) {
+          els.workspaceDivider.addEventListener("pointerdown", function (event) {
+            event.preventDefault();
+            workspaceResizeActive = true;
+            workspaceDividerPointerId = event.pointerId;
+            workspaceResizeSession = createWorkspaceResizeSession();
+            workspaceResizePendingClientX = null;
+            if (workspaceResizeFrameId !== null && window.cancelAnimationFrame) {
+              window.cancelAnimationFrame(workspaceResizeFrameId);
+              workspaceResizeFrameId = null;
+            }
+            document.body.classList.add("workspace-resizing");
+            if (els.workspaceDivider.setPointerCapture) {
+              els.workspaceDivider.setPointerCapture(event.pointerId);
+            }
+            updateWorkspaceSplitFromClientX(event.clientX);
+          });
+          els.workspaceDivider.addEventListener("pointermove", function (event) {
+            if (!workspaceResizeActive || event.pointerId !== workspaceDividerPointerId) return;
+            updateWorkspaceSplitFromClientX(event.clientX);
+          });
+          els.workspaceDivider.addEventListener("pointerup", stopWorkspaceResize);
+          els.workspaceDivider.addEventListener("pointercancel", stopWorkspaceResize);
+          els.workspaceDivider.addEventListener("lostpointercapture", stopWorkspaceResize);
+          els.workspaceDivider.addEventListener("keydown", function (event) {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              nudgeWorkspaceSplit(-1);
+              return;
+            }
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              nudgeWorkspaceSplit(1);
+              return;
+            }
+            if (event.key === "Home") {
+              event.preventDefault();
+              workspaceSplitRatio = 0;
+              applyWorkspaceSplit();
+              persistWorkspaceSplitRatio();
+              schedulePdfRender();
+              return;
+            }
+            if (event.key === "End") {
+              event.preventDefault();
+              workspaceSplitRatio = 1;
+              applyWorkspaceSplit();
+              persistWorkspaceSplitRatio();
+              schedulePdfRender();
+            }
+          });
+        }
+
+        els.headerBackHomeBtn.addEventListener("click", function () { runAction(goBackHomeFromHeader); });
+        window.addEventListener("resize", function () {
+          applyWorkspaceSplit();
+          persistWorkspaceSplitRatio();
+          schedulePdfRender();
+        });
+
+        /* ── Event Listeners ──────────────────── */
+        els.configForm.addEventListener("submit", function (event) { runAction(function () { return saveConfig(event); }); });
+        els.loadConfigBtn.addEventListener("click", function () { runAction(loadConfig); });
+        els.restoreInitialConfigBtn.addEventListener("click", function () { runAction(restoreInitialConfig); });
+        els.configTestBtn.addEventListener("click", function () { runAction(testConfigConnection); });
+        els.refreshJobBtn.addEventListener("click", function () { runAction(refreshWorkspace); });
+        els.historyList.addEventListener("click", function (event) {
+          var target = event.target;
+          var button = target && target.closest ? target.closest("[data-history-action]") : null;
+          if (!button) return;
+          var action = button.getAttribute("data-history-action");
+          var jobId = button.getAttribute("data-job-id");
+          if (action === "open") {
+            runAction(function () { return openHistoryJob(jobId); });
+            return;
+          }
+          if (action === "delete") {
+            runAction(function () { return deleteHistoryJob(jobId); });
+          }
+        });
+        els.buildOutputBtn.addEventListener("click", function (event) {
+          event.stopPropagation();
+          if (els.buildOutputBtn.disabled) return;
+          els.outputBuildMenu.classList.toggle("hidden");
+        });
+        els.startExtractionBtn.addEventListener("click", function () { runAction(startExtractionForPreparedFile); });
+        els.singlePageTestBtn.addEventListener("click", function () { runAction(runSinglePageTestForPreparedFile); });
+        els.outputBuildMenu.addEventListener("click", function (event) {
+          event.stopPropagation();
+          var target = event.target;
+          var button = target && target.closest ? target.closest("[data-merge-mode]") : null;
+          if (!button) return;
+          runAction(function () { return buildOutput(button.getAttribute("data-merge-mode")); });
+        });
+        document.addEventListener("click", function (event) {
+          if (!els.outputBuildMenuWrap.contains(event.target)) {
+            closeBuildOutputMenu();
+          }
+        });
+        els.pageEditor.addEventListener("input", schedulePageAutoSave);
+        els.pageEditor.addEventListener("blur", function () { runAction(flushPendingPageSave); });
+        els.retryPageBtn.addEventListener("click", function () { runAction(retryCurrentPage); });
+        els.discardOutputBtn.addEventListener("click", function () { runAction(discardOutput); });
+        els.outputEditor.addEventListener("input", scheduleOutputAutoSave);
+        els.outputEditor.addEventListener("blur", function () { runAction(flushPendingOutputSave); });
+        els.pageSelect.addEventListener("change", function () { runAction(onPageSelectionChanged); });
+        els.prevPageBtn.addEventListener("click", goPrevPage);
+        els.nextPageBtn.addEventListener("click", goNextPage);
+
+        /* ── Init from URL ────────────────────── */
+        function initJobFromPath() {
+          var matched = window.location.pathname.match(/^\/jobs\/([^/?#]+)\/?$/);
+          if (!matched || !matched[1]) return null;
+          return decodeURIComponent(matched[1]);
+        }
+
+        /* ── Global export for tests ──────────── */
+        window.__pdfKnowledgeBaseApp = {
+          state: state,
+          refreshWorkspace: refreshWorkspace,
+          loadConfig: loadConfig,
+          closeStream: closeStream,
+          applyWorkspaceSplit: applyWorkspaceSplit,
+        };
+
+        /* ── Bootstrap ────────────────────────── */
+        runAction(async function () {
+          loadPersistedWorkspaceSplitRatio();
+          applyWorkspaceSplit();
+          await loadConfig();
+          var jobIdFromPath = initJobFromPath();
+          if (jobIdFromPath) {
+            state.jobId = jobIdFromPath;
+            await refreshWorkspace();
+          } else {
+            await syncHistoryPanelOnDemand(false);
+            updateControlAvailability();
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
