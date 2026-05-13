@@ -31,7 +31,8 @@ serve_app() {
   local host="${1:-127.0.0.1}"
   local port="${2:-8000}"
   echo "[init] Starting API server at http://${host}:${port}"
-  uv run uvicorn backend.api.app:create_api_app --factory --host "${host}" --port "${port}"
+  # Avoid uv's Windows trampoline on `uv run uvicorn` ("Failed to canonicalize script path").
+  uv run python -m uvicorn backend.api.app:create_api_app --factory --host "${host}" --port "${port}"
 }
 
 usage() {
